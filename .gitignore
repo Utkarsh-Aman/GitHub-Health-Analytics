@@ -1,7 +1,7 @@
 github_analytics.db
 gh_archive_data.csv
 *.db
-*.csv
+gh_archive_data.csv
 __pycache__/
 .DS_Store
 *.pyc
