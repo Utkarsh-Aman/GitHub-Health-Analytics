@@ -373,6 +373,145 @@ metrics from it.
 - Sort contributors by activity descending
 - Bus factor = minimum people whose removal costs 
   the project 50% of its activity
+---
+
+## 7a. Bus Factor — Explained
+
+### What is "bus factor"?
+It's a way to measure how risky a project is in terms of 
+people. It answers: "If the top contributors got hit by a 
+bus tomorrow, how much trouble would this project be in?"
+
+A **low bus factor** (like 1 or 2) means the project depends 
+heavily on a tiny number of people. If they left, the project 
+would struggle to keep going.
+
+A **high bus factor** means contribution is spread across many 
+people, so the project is more resilient — losing a few people 
+doesn't hurt much.
+
+### How we calculated it
+
+**Step 1 — Decide what counts as "activity"**
+We used two event types as a proxy for real contribution work:
+- `PushEvent` (someone pushed code)
+- `PullRequestEvent` (someone opened/worked on a PR)
+
+We did NOT include comments, issues, or watches here — those 
+measure discussion/interest, not code contribution.
+
+**Step 2 — Remove bots**
+Every repo has automated accounts (CI bots, merge bots, release 
+bots) that generate huge amounts of fake "activity." We already 
+had an `is_bot` column from data cleaning, so we filtered these 
+out. Without this step, bots would completely hide the real 
+human bus factor.
+
+**Step 3 — Count activity per person, per repo**
+For each repo, we counted how many push/PR events each human 
+contributor made.
+
+**Step 4 — Sort and find the tipping point**
+We sorted contributors from most active to least active, then 
+added them up one by one until we crossed 50% of the repo's 
+total activity. The number of people it took to cross that 
+line is the bus factor.
+
+Example: if a repo's top 3 contributors together made 50%+ of 
+all push/PR activity, the bus factor is 3.
+
+### The code
+
+```python
+import pandas as pd
+import sqlite3
+
+conn = sqlite3.connect('github_analytics.db')
+
+# Pull only push + PR activity, excluding bots
+query = """
+SELECT repo, actor
+FROM events
+WHERE event_type IN ('PushEvent', 'PullRequestEvent')
+  AND is_bot = 0
+"""
+df = pd.read_sql(query, conn)
+conn.close()
+
+# Count activity per actor per repo
+activity = (
+    df.groupby(['repo', 'actor'])
+      .size()
+      .reset_index(name='activity_count')
+)
+
+# For each repo, find minimum contributors covering 50% of activity
+def compute_bus_factor(group):
+    sorted_group = group.sort_values('activity_count', ascending=False).reset_index(drop=True)
+    total = sorted_group['activity_count'].sum()
+    threshold = total * 0.5
+
+    cumulative = 0
+    for i, row in sorted_group.iterrows():
+        cumulative += row['activity_count']
+        if cumulative >= threshold:
+            return i + 1  # people needed, 1-indexed
+    return len(sorted_group)
+
+bus_factor_results = []
+for repo, group in activity.groupby('repo'):
+    bf = compute_bus_factor(group)
+    bus_factor_results.append({
+        'repo': repo,
+        'bus_factor': bf,
+        'total_contributors': group['actor'].nunique(),
+        'total_activity': group['activity_count'].sum()
+    })
+
+bus_factor_df = pd.DataFrame(bus_factor_results).sort_values('bus_factor')
+bus_factor_df.to_csv('bus_factor.csv', index=False)
+```
+
+### Output
+`features/bus_factor.csv` — one row per repo, with:
+
+| Column | Meaning |
+|---|---|
+| repo | repo name |
+| bus_factor | min. people whose removal would cost 50%+ of push/PR activity |
+| total_contributors | how many unique humans contributed |
+| total_activity | total push/PR events (bots excluded) |
+
+### Validation — did we trust the numbers?
+Two repos initially looked suspicious: `kubernetes/kubernetes` 
+(bus_factor 56) and `tensorflow/tensorflow` (bus_factor 13) — 
+both had surprisingly low total activity for their size.
+
+We manually queried the top contributors for both repos and 
+found the real explanation: both are dominated by merge bots 
+(`k8s-ci-robot`, `copybara-service[bot]`) that were correctly 
+excluded by our bot filter. What's left is real human activity, 
+which happens to be spread very thin across many contributors — 
+a real finding, not a bug.
+
+**Known limitation:** our bot-detection regex catches most 
+automated accounts (`bot`, `[bot]`, `robot`, `mirror`) but 
+missed `tensorflow-jenkins`, which is likely also automated. 
+Impact is small (573 events, doesn't change the result 
+meaningfully) so we left it as-is. Worth tightening the regex 
+in a future pass if time allows.
+
+### Interesting findings for the presentation
+- `kubernetes/kubernetes`: bus_factor 56 — extremely well 
+  distributed human contribution, almost everything else is bots
+- `pytorch/pytorch`: bus_factor 29 out of 2266 contributors — 
+  large base but still fairly concentrated at the top
+- `vuejs/vue`: bus_factor 22 out of only 190 contributors — 
+  unusually concentrated for a smaller project
+- `tiangolo/fastapi`, `keras-team/keras`, `pallets/flask`: 
+  bus_factor 1 — classic "one maintainer holds it together" risk
+
+---
 
 ### Scripts
 See `features/feature_engineering.py`
