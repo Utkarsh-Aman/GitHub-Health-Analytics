@@ -472,10 +472,121 @@ bus_factor_df.to_csv('bus_factor.csv', index=False)
 - `pytorch/pytorch`: bus_factor 29 out of 2266 contributors
 - `kubernetes/kubernetes`: bus_factor 56 — very well distributed
 
+## 7b. Contributor Network — Explained
+
+### What is the "contributor network"?
+It is a relationship graph that maps out who is collaborating with whom within a repository. It answers: "Is this project a deeply connected community where everyone talks to each other, or is it a group of isolated developers working in silos?"
+
+In this network:
+- **Nodes** are individual human contributors.
+- **Edges** (connections) are formed when two people collaborate on the same issue or pull request.
+- **Weight** represents how many times they collaborated.
+- **Centrality** measures how important/connected a specific person is to the rest of the network.
+
+### How we calculated it
+
+**Step 1 — Identify Collaboration Arenas**
+We defined a collaboration as two people participating in the same discussion thread. We queried `PullRequestEvent` and `IssueCommentEvent` from our database, ensuring bots were filtered out (`is_bot = 0`). 
+
+**Step 2 — Generate Edges (Connections)**
+For every unique issue or PR number, we grabbed the list of actors involved. Using Python's `itertools.combinations`, we created a pairing (an edge) between every single person in that specific thread. 
+
+**Step 3 — Collapse and Filter Noise**
+A single thread with 5 people generates many edges. Across millions of events, people might interact once by pure chance. To make the graph meaningful and performant for Dash/Cytoscape, we:
+- Grouped identical edges to calculate a `weight` (total interactions between User A and User B).
+- Filtered out one-off interactions by enforcing a strict `weight >= 2` rule. 
+
+**Step 4 — Calculate Node Centrality**
+Using the `networkx` library, we built a graph for each repository and calculated the **Degree Centrality** for every node. This gives us a metric (between 0 and 1) representing the fraction of the network a single contributor is connected to. 
+
+### The code
+
+```python
+import sqlite3
+import pandas as pd
+import os
+from itertools import combinations
+import networkx as nx
+
+# Setup paths and connect to DB
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(SCRIPT_DIR, '..', 'data', 'github_analytics.db')
+
+conn = sqlite3.connect(DB_PATH)
+
+# Pull PR and Issue discussion activity, excluding bots
+activity = pd.read_sql_query("""
+    SELECT repo, pr_or_issue_number, actor
+    FROM events
+    WHERE is_bot = 0
+      AND event_type IN ('PullRequestEvent', 'IssueCommentEvent')
+""", conn)
+conn.close()
+
+# Build edges: Connect actors who participated in the same PR/Issue
+edges = []
+for (repo, number), group in activity.groupby(['repo', 'pr_or_issue_number']):
+    actors = group['actor'].unique().tolist()
+    if len(actors) >= 2:
+        for a, b in combinations(sorted(actors), 2):
+            edges.append({'repo': repo, 'source': a, 'target': b})
+
+edge_df = pd.DataFrame(edges)
+
+# Collapse edges to calculate weights and filter out one-off interactions
+edge_df = edge_df.groupby(['repo', 'source', 'target']).size().reset_index(name='weight')
+edge_df = edge_df[edge_df['weight'] >= 2]
+
+# Calculate Degree Centrality using NetworkX
+node_stats = []
+for repo, group in edge_df.groupby('repo'):
+    G = nx.Graph()
+    for _, row in group.iterrows():
+        G.add_edge(row['source'], row['target'], weight=row['weight'])
+    
+    centrality = nx.degree_centrality(G)
+    for actor, c in centrality.items():
+        node_stats.append({'repo': repo, 'actor': actor, 'centrality': c})
+
+node_df = pd.DataFrame(node_stats)
+
+# Map centrality scores back to the edge list for plotting
+node_lookup = node_df.set_index(['repo', 'actor'])['centrality']
+edge_df['source_centrality'] = edge_df.set_index(['repo','source']).index.map(node_lookup)
+edge_df['target_centrality'] = edge_df.set_index(['repo','target']).index.map(node_lookup)
+
+# Save to CSV
+OUTPUT_PATH = os.path.join(SCRIPT_DIR, 'contributor_network.csv')
+edge_df.to_csv(OUTPUT_PATH, index=False)
+```
+
+### Output
+`features/contributor_network.csv` — contains edge list data ready for Dash-Cytoscape mapping, with the following columns:
+
+| Column | Meaning |
+|---|---|
+| repo | The repository name |
+| source | GitHub username of first collaborator |
+| target | GitHub username of second collaborator |
+| weight | Number of times they collaborated (min. 2) |
+| source_centrality | Network importance score of the source user |
+| target_centrality | Network importance score of the target user |
+
+### Scripts
+See `features/contributer_network.py`
+
+### Interesting findings for the presentation
+- **The "Linchpin" Contributors:** Centrality perfectly highlights single-maintainer dependencies. For `pallets/flask`, the user `davidism` has a centrality score of 0.956, meaning they are directly connected to 95.6% of everyone who collaborated in the entire repository. Similarly, `tiangolo` has a centrality of 0.869 in `tiangolo/fastapi`.
+- **Massive Developer Ecosystems:** `kubernetes/kubernetes` and `pytorch/pytorch` have the largest raw networks by far, with 7,480 and 6,453 significant edges respectively. However, their maximum centrality scores hover around a much healthier ~0.35, proving these are highly decentralized communities where collaboration is spread out, rather than bottlenecked by one person.
+- **Power Duos:** The human contributors who collaborated the most frequently across all repositories analyzed were `ijjk` and `timneutkens` on the `vercel/next.js` repository, racking up an impressive 887 shared interactions.
+- **Hidden Bot Detection:** This network analysis inadvertently caught a flaw in our bot filtering! `elastic/elasticsearch` has a user named `elasticsearchmachine` with 1,858 interactions and 0.94 centrality. `huggingface/transformers` has `HuggingFaceDocBuilderDev` with 986 interactions. We missed these with our original `bot|robot` regex, demonstrating how network centrality can be used as an anomaly detection tool to find undeclared automated accounts.
+
 ### Scripts
 See `features/feature_engineering.py`
 
----
+--
+
+
 
 ## 8. Tech Stack Decisions
 
@@ -774,25 +885,462 @@ What goes here:
 
 
 
-## 11. What Comes Next
+## 11. Understanding globals.py and data_loader.py
 
-### Build order for visualizations
-Build in this order — easiest to hardest:
+These two files are the foundation of the entire app.
+Every visualization file depends on them.
+Nobody should need to touch these files once they are written.
+Just import from them and use the functions.
 
-1. `bot_bar_cb.py` — just counts, simplest chart
-2. `streamgraph_cb.py` — monthly aggregation, stacked area
-3. `heatmap_cb.py` — daily grouping, calendar layout
-4. `sankey_cb.py` — needs pr_latency table ready
-5. `network_cb.py` — needs contributor_network table + NetworkX
-6. `dashboard_cb.py` — built last, depends on everything else
+---
 
-### How to combine everyone's work
-- Each person writes their callback file independently
-- Person 6 or 7 imports all callbacks in `app.py`
-- Feature CSV files are pushed to GitHub by each person
-- Person 1 or 2 loads all CSVs into the database and 
-  shares the updated database on Google Drive
+### `app/globals.py` — What it does
 
+This file runs once when the app starts.
+It sets up three things that every other file needs:
+
+**1. The path to the database**
+It figures out where `github_analytics.db` is on your laptop
+automatically, so you never have to hardcode a path.
+
+**2. A function to connect to the database**
+```python
+get_connection()
+```
+Call this whenever you need to query the main events table.
+It returns a SQLite connection. Always close it after use.
+
+**3. Three shared lists loaded at startup**
+```python
+REPOS    # list of all 30 repo names
+ECOSYSTEMS  # ['Frontend', 'ML/Data', 'Backend/DevOps']
+MONTHS   # ['2023-01', '2023-02', ... '2024-12']
+```
+These are used by the filter dropdowns and date slider
+in the app. They are loaded once and reused everywhere.
+
+**How to use it in your file:**
+```python
+from app.globals import REPOS, ECOSYSTEMS, MONTHS, get_connection
+```
+
+---
+
+### `src/data_loader.py` — What it does
+
+This file has all the functions that fetch data.
+No other file should write SQL or read CSVs directly.
+You just call the function and get a clean DataFrame back.
+
+Think of it like a menu — you order what you want
+and get it served to you ready to use.
+
+---
+
+### The 6 functions and what they return
+
+---
+
+**1. load_events()**
+
+Queries the main events table from the SQLite database.
+This is the raw GitHub activity data — 3.4 million rows.
+You will rarely need all of it — always pass filters.
+
+```python
+from src.data_loader import load_events
+
+# Example — get only React and Vue events, no bots
+df = load_events(
+    repos=['facebook/react', 'vuejs/vue'],
+    start_month='2023-01',
+    end_month='2023-12',
+    include_bots=False
+)
+```
+
+Parameters you can pass:
+| Parameter | What it does | Example |
+|-----------|-------------|---------|
+| repos | filter to specific repos | ['facebook/react'] |
+| ecosystem | filter to one ecosystem | 'Frontend' |
+| start_month | events from this month | '2023-06' |
+| end_month | events until this month | '2024-06' |
+| include_bots | include bot events or not | False |
+
+Returns a DataFrame with all 10 columns from the events table.
+
+---
+
+**2. load_pr_latency()**
+
+Reads from `features/pr_latency.csv`
+Contains how long each PR took to get merged.
+
+```python
+from src.data_loader import load_pr_latency
+
+df = load_pr_latency(repos=['facebook/react'])
+```
+
+Columns you get back:
+| Column | Meaning |
+|--------|---------|
+| repo | repository name |
+| pr_or_issue_number | PR number |
+| opened_at | when the PR was opened |
+| merged_at | when the PR was merged |
+| latency_hours | how many hours it took to merge |
+| month | which month this happened in |
+
+Used by: PR Sankey chart, Health Dashboard
+
+---
+
+**3. load_issue_response()**
+
+Reads from `features/issue_response.csv`
+Contains how long each issue waited before getting
+its first response.
+
+```python
+from src.data_loader import load_issue_response
+
+df = load_issue_response(repos=['pytorch/pytorch'])
+```
+
+Columns you get back:
+| Column | Meaning |
+|--------|---------|
+| repo | repository name |
+| issue_number | issue number |
+| opened_at | when issue was opened |
+| first_comment_at | when first comment arrived |
+| response_hours | how many hours until first response |
+| has_response | True if someone responded |
+| year_month | month of the issue |
+
+Used by: Issue Heatmap, Health Dashboard
+
+---
+
+**4. load_bot_activity()**
+
+Reads from `features/bot_activity.csv`
+Contains monthly breakdown of bot vs human events
+per repository.
+
+```python
+from src.data_loader import load_bot_activity
+
+df = load_bot_activity(repos=['kubernetes/kubernetes'])
+```
+
+Columns you get back:
+| Column | Meaning |
+|--------|---------|
+| repo | repository name |
+| ecosystem | which ecosystem |
+| year_month | the month |
+| is_bot | 0 = human, 1 = bot |
+| event_count | number of events that month |
+
+Used by: Bot vs Human Bar Chart, Health Dashboard
+
+---
+
+**5. load_bus_factor()**
+
+Reads from `features/bus_factor.csv`
+Contains the bus factor score for each repository.
+
+```python
+from src.data_loader import load_bus_factor
+
+df = load_bus_factor()
+# or filter to specific repos
+df = load_bus_factor(repos=['tiangolo/fastapi'])
+```
+
+Columns you get back:
+| Column | Meaning |
+|--------|---------|
+| repo | repository name |
+| bus_factor | how many people control 50% of activity |
+| total_contributors | total unique human contributors |
+| total_activity | total human push/PR events |
+
+Key finding from our data:
+- fastapi, flask, keras all have bus_factor = 1
+  meaning one person holds each project together
+- kubernetes has bus_factor = 56
+  meaning contribution is very well distributed
+
+Used by: Contributor Network, Health Dashboard
+
+---
+
+**6. load_contributor_network()**
+
+Reads from `features/contributor_network.csv`
+Contains pairs of contributors who worked together,
+and how many times they collaborated.
+
+Note: takes a single repo name, not a list.
+
+```python
+from src.data_loader import load_contributor_network
+
+df = load_contributor_network('facebook/react')
+```
+
+Columns you get back:
+| Column | Meaning |
+|--------|---------|
+| repo | repository name |
+| source | first contributor username |
+| target | second contributor username |
+| weight | how many times they collaborated |
+| source_centrality | how central source is in network |
+| target_centrality | how central target is in network |
+
+Returns only top 500 edges by weight for performance.
+
+Used by: Contributor Network Graph
+
+---
+
+### Quick Reference — Which function does each chart need?
+
+| Chart | Functions needed |
+|-------|-----------------|
+| Streamgraph | load_events() |
+| Contributor Network | load_contributor_network(), load_bus_factor() |
+| PR Sankey | load_events(), load_pr_latency() |
+| Issue Heatmap | load_events(), load_issue_response() |
+| Bot Bar Chart | load_bot_activity() |
+| Health Dashboard | load_pr_latency(), load_issue_response(), load_bot_activity(), load_bus_factor() |
+
+---
+
+### How to verify everything works on your laptop
+
+Run this command from the root project folder:
+```bash
+python3 src/data_loader.py
+```
+
+You should see data printed for all 6 functions.
+If you see data — you are ready to start building your chart.
+If you see an error — check that github_analytics.db is in 
+the root folder and the feature CSVs are in features/ folder.
+
+
+
+## 12. Understanding analytics.py and filters.py
+
+These two files contain helper functions that process 
+data before it gets passed to the visualization charts.
+They sit between data_loader.py and the callback files.
+
+The flow is:
+data_loader.py → analytics.py → callback files → chart
+
+---
+
+### `src/analytics.py` — What it does
+
+This file takes raw DataFrames and computes something 
+useful from them. Think of it like a calculator —
+you give it data, it gives you processed results.
+
+It has 5 functions, each used by a specific chart.
+
+---
+
+**Function 1 — compute_monthly_activity()**
+
+Used by: streamgraph chart
+
+Takes the raw events data and counts how many events 
+happened per repo per month.
+
+Example of what you give it:
+repo            | date       | event_type
+facebook/react  | 2023-01-05 | PushEvent
+pytorch/pytorch | 2023-01-07 | IssuesEvent
+
+Example of what you get back:
+year_month | repo            | event_count
+2023-01    | facebook/react  | 2528
+2023-01    | pytorch/pytorch | 15360
+2023-02    | facebook/react  | 2945
+
+Why we need this: the streamgraph needs monthly totals 
+per repo to draw the stacked area chart. The raw data 
+has one row per event which is 3.4 million rows —
+we need to summarize it first.
+
+---
+
+**Function 2 — compute_ecosystem_monthly()**
+
+Used by: streamgraph chart
+
+Same as above but groups by ecosystem instead of 
+individual repo. So instead of seeing facebook/react 
+and vuejs/vue separately, you see "Frontend" as one 
+combined number.
+
+Example of what you get back:
+year_month | ecosystem | event_count
+2023-01    | Frontend  | 2528
+2023-01    | ML/Data   | 15360
+2023-02    | Frontend  | 2945
+
+Why we need this: when the user selects "show by 
+ecosystem" instead of individual repos, this function 
+provides the right aggregation.
+
+---
+
+**Function 3 — get_pr_stage_counts()**
+
+Used by: PR Sankey chart
+
+Counts how many PRs are at each stage of their 
+lifecycle. Three stages: opened, merged, and closed 
+without merging.
+
+Example of what you get back:
+```python
+{
+    'opened': 4074,
+    'merged': 293,
+    'closed_without_merge': 927
+}
+```
+
+What this means in plain English:
+- 4074 PRs were opened in the selected time period
+- 293 of them got merged successfully
+- 927 of them were closed without being merged
+- The rest are still open
+
+Why we need this: the Sankey diagram needs these 
+three numbers to draw the flow from opened to 
+merged or closed.
+
+Important finding: only 293 out of 4074 PRs merged 
+in a 3 month window for react and pytorch — most 
+PRs either stay open or get closed without merging.
+
+---
+
+**Function 4 — compute_daily_issue_activity()**
+
+Used by: Issue Heatmap chart
+
+Counts how many issue events happened each day.
+Also computes the week number and day of week for 
+each date so the calendar heatmap can be drawn.
+
+Example of what you get back:
+date       | count | week | day_of_week | year
+2023-01-01 | 35    | 52   | 6           | 2023
+2023-01-02 | 104   | 1    | 0           | 2023
+2023-01-03 | 255   | 1    | 1           | 2023
+
+Why we need this: the calendar heatmap needs one 
+count per day to color each cell. Green = active day, 
+white/empty = no activity that day.
+Gaps in the heatmap immediately show when maintainers 
+went quiet.
+
+---
+
+**Function 5 — compute_health_summary()**
+
+Used by: Health Dashboard
+
+This is the most important function. It takes data 
+from all four feature CSVs and computes a single 
+summary row for each selected repository.
+
+What you give it:
+- list of repos
+- pr_latency DataFrame
+- issue_response DataFrame  
+- bot_activity DataFrame
+- bus_factor DataFrame
+
+What you get back:
+repo            | median_merge | median_response | bus_factor | bot_pct
+facebook/react  | 15.4 hrs     | 12.8 hrs        | 5          | 12.3%
+pytorch/pytorch | 19.4 hrs     | 16.4 hrs        | 29         | 34.6%
+
+Why we need this: the health dashboard shows all 
+repos side by side with their key metrics. This 
+function does all the computation so the dashboard 
+callback just needs to display the table.
+
+What these numbers mean for our repos:
+- facebook/react: bus_factor 5, 12.3% bots — 
+  small core team, mostly real humans working
+- pytorch/pytorch: bus_factor 29, 34.6% bots — 
+  larger distributed team but heavy automation
+
+---
+
+### `app/components/filters.py` — What it does
+
+This is the simplest file in the whole project.
+It has one function that every callback file uses.
+
+The date range in our app is a slider with positions 
+0 to 23 (one position per month from Jan 2023 to 
+Dec 2024). When a user moves the slider, the callback 
+gets numbers like [3, 18] — but the database needs 
+actual month strings like '2023-04' and '2024-07'.
+
+This function does that conversion.
+
+**Function — get_month_range()**
+
+```python
+from app.components.filters import get_month_range
+
+start, end = get_month_range([0, 23])
+# start = '2023-01'
+# end   = '2024-12'
+
+start, end = get_month_range([3, 18])
+# start = '2023-04'
+# end   = '2024-07'
+```
+
+Why we put this in a separate file: every single 
+callback needs to convert slider values to month 
+strings. Instead of writing the same code 6 times 
+in 6 different files, we write it once here and 
+everyone imports it.
+
+---
+
+### How these files connect to everything else
+User moves date slider
+↓
+Callback receives [3, 18]
+↓
+filters.py converts to ('2023-04', '2024-07')
+↓
+data_loader.py queries database with those months
+↓
+analytics.py computes monthly counts / stage counts / etc
+↓
+Callback builds the chart with processed data
+↓
+Chart updates on screen
 ### Final deliverables
 - Working web application
 - Project report in LaTeX
@@ -801,5 +1349,369 @@ Build in this order — easiest to hardest:
 
 ---
 
+## 13. Visualization Files — What Each One Does
+
+This section explains every visualization file in simple 
+language so every teammate understands what was built, 
+how it works, and what data it uses.
+
+---
+
+### How Visualizations Work in Our App
+
+The flow for every chart is the same:
+User changes a filter (repo, date, ecosystem)
+↓
+Dash automatically calls the callback function
+↓
+Callback fetches data using data_loader.py
+↓
+Callback builds a plotly figure
+↓
+Chart updates on screen instantly
+
+Every callback file has one function called register(app).
+This function contains the @app.callback decorator which 
+tells Dash which inputs to listen to and which chart to update.
+
+---
+
+### `app/callbacks/bot_bar_cb.py`
+**Chart: Bot vs Human Activity**
+**Assigned to: [Name]**
+
+#### What question does it answer?
+How much of each repository's activity is real humans 
+vs automated bots? Is the high activity we see in 
+pytorch or kubernetes actually real developer work, 
+or mostly CI bots and merge bots?
+
+#### What data does it use?
+Reads from `features/bot_activity.csv` using 
+`load_bot_activity()` from data_loader.py.
+
+The CSV has one row per repo per month per type (bot/human):
+repo            | year_month | is_bot | event_count
+facebook/react  | 2023-01    | 0      | 2200
+facebook/react  | 2023-01    | 1      | 320
+pytorch/pytorch | 2023-01    | 0      | 9800
+pytorch/pytorch | 2023-01    | 1      | 5500
+
+#### How it works step by step
+1. Gets selected repos and month range from filters
+2. Loads bot_activity.csv filtered to selected repos
+3. Filters rows to only the selected month range
+4. Groups by repo and is_bot, sums event counts
+5. Pivots so each repo has one human count and one bot count
+6. Builds a stacked bar chart — blue for human, red for bot
+
+#### Why stacked bar chart?
+A stacked bar shows both the total height (overall activity) 
+and the split (how much is bot vs human) at the same time. 
+A pie chart would only show proportions without showing 
+which repo has more total activity.
+
+#### Key finding from our data
+- kubernetes/kubernetes: bots outnumber humans 
+  8954 bot events vs 6826 human events in Jan 2023
+- facebook/react: 12.3% bot activity — mostly real humans
+- pytorch/pytorch: 34.6% bot activity — heavy automation
+
+#### Inputs it listens to
+- `repo-filter` dropdown
+- `month-slider` date range
+
+---
+
+### `app/callbacks/heatmap_cb.py`
+**Chart: Issue Responsiveness Calendar Heatmap**
+**Assigned to: [Name]**
+
+#### What question does it answer?
+Is this project actively responding to issues? When did 
+maintainers go quiet? Are there obvious gaps in activity 
+that suggest the project slowed down or was abandoned?
+
+#### What data does it use?
+Reads from `features/issue_response.csv` using 
+`load_issue_response()` from data_loader.py.
+
+Uses the `opened_date` column to count how many issues 
+were opened each day.
+
+#### How it works step by step
+1. Gets selected repos and month range from filters
+2. Loads issue_response.csv filtered to selected repos
+3. Filters to selected month range
+4. Counts issues opened per day
+5. Fills in missing dates with 0 so the calendar is complete
+6. Computes week_index and day_of_week for each date
+7. Builds a heatmap where:
+   - x axis = week number
+   - y axis = day of week (Mon to Sun)
+   - color = number of issues that day (darker = more)
+
+#### Why calendar heatmap?
+A line chart would show a wiggly line that makes gaps 
+hard to spot. A calendar heatmap makes silence immediately 
+obvious — you literally see white/empty squares where 
+maintainers went quiet. This is the most intuitive way 
+to show activity patterns over time.
+
+#### Why not a bar chart?
+A bar chart per day over 2 years would be 730 bars — 
+completely unreadable. The calendar layout compresses 
+2 years into a compact visual that fits on screen.
+
+#### Inputs it listens to
+- `repo-filter` dropdown
+- `month-slider` date range
+
+---
+
+### `app/callbacks/sankey_cb.py`
+**Chart: PR Lifecycle and Review Latency**
+**Assigned to: [Name]**
+
+#### What question does it answer?
+Where do pull requests end up? How many get merged vs 
+closed without merging? And how long does it take for 
+a PR to get merged in each repository?
+
+#### What data does it use?
+Reads from `features/pr_latency.csv` using 
+`load_pr_latency()` from data_loader.py.
+
+The CSV has one row per merged PR:
+repo            | pr_number | opened_at | merged_at | latency_hours | month
+facebook/react  | 25963     | 2023-01-05| 2023-01-05| 12.4          | 2023-01
+
+#### How it works step by step
+1. Gets selected repos and month range from filters
+2. Loads pr_latency.csv filtered to selected repos
+3. Filters to selected month range
+4. Counts merged PRs from the data
+5. Estimates closed-without-merge count as 42.8% of merged 
+   (based on historical GitHub ratio)
+6. Builds two charts side by side:
+   - Left: Sankey diagram showing PR flow
+   - Right: Box plot showing merge time distribution
+
+#### Why Sankey diagram?
+The Sankey makes it immediately clear how many PRs 
+enter the system (opened) and where they end up 
+(merged or closed). The width of each flow line is 
+proportional to the number of PRs. A bar chart cannot 
+show this directional flow clearly.
+
+#### Why box plot alongside it?
+The box plot shows the distribution of merge times —
+the median, the spread, and the outliers. It answers 
+"most PRs merge in X hours but some take weeks". A 
+single average number would hide this distribution.
+
+#### Note on closed-without-merge estimate
+The pr_latency.csv only contains merged PRs because 
+we could only compute latency for PRs that were 
+actually merged. Closed PRs have no merge timestamp. 
+We estimate closed-without-merge count using the 
+historical GitHub average ratio of ~30% closed 
+without merge vs 70% merged.
+
+#### Inputs it listens to
+- `repo-filter` dropdown
+- `month-slider` date range
+
+---
+
+### `app/callbacks/streamgraph_cb.py`
+**Chart: Technology Adoption Streamgraph**
+**Assigned to: [Name]**
+
+#### What question does it answer?
+Which technology ecosystems are growing or declining 
+in developer activity over time? Is ML/Data becoming 
+more dominant? Is Frontend activity stable or shrinking?
+
+#### What data does it use?
+Reads from `features/bot_activity.csv` using 
+`load_bot_activity()` from data_loader.py.
+
+Uses only human events (is_bot == 0) to show real 
+developer adoption, not automation.
+
+Groups events by ecosystem (Frontend, ML/Data, 
+Backend/DevOps) and month.
+
+#### How it works step by step
+1. Gets selected repos and ecosystem from filters
+2. Loads bot_activity.csv for selected repos
+3. Filters out bot events (is_bot == 1)
+4. Groups by year_month and ecosystem, sums event counts
+5. Computes a symmetric baseline (centers the streams 
+   around zero so it looks like a proper streamgraph)
+6. Adds one filled area trace per ecosystem
+
+#### Why streamgraph?
+A regular stacked area chart starts all stacks from 
+zero at the bottom. A streamgraph centers the stacks 
+symmetrically which makes relative growth and decline 
+much easier to see. Rising ecosystems visually expand 
+outward while shrinking ones compress inward.
+
+#### Why not a line chart?
+A line chart with 3 lines would show absolute numbers 
+but not relative proportions. The streamgraph shows 
+both — how each ecosystem's share of total activity 
+changes month by month.
+
+#### Why not pie chart?
+A pie chart is a snapshot in time. Our data spans 
+24 months — you need a time-based chart to show trends.
+
+#### Inputs it listens to
+- `repo-filter` dropdown
+- `ecosystem-filter` dropdown
+
+---
+
+### `app/callbacks/network_cb.py`
+**Chart: Contributor Collaboration Network**
+**Assigned to: [Name]**
+
+#### What question does it answer?
+Who are the key contributors in a repository? Who 
+collaborates with whom? Is the project dangerously 
+concentrated around a few central people? What is 
+the bus factor risk?
+
+#### What data does it use?
+Two data sources:
+
+1. `features/contributor_network.csv` using 
+   `load_contributor_network(repo)`
+   Contains pairs of contributors who commented on 
+   the same PR, with a weight for how many times they 
+   collaborated:
+source    | target      | weight | source_centrality | target_centrality
+eps1lon   | rickhanlonii| 27     | 0.279             | 0.177
+eps1lon   | sebmarkbage | 26     | 0.279             | 0.140
+
+2. `features/bus_factor.csv` using `load_bus_factor()`
+   For the summary text showing bus factor score.
+
+#### How it works step by step
+1. User selects ONE repo from the network-specific dropdown
+2. Loads contributor_network.csv for that repo 
+   (top 500 edges by weight)
+3. Builds a centrality map — for each contributor, 
+   takes the max centrality value across all their edges
+4. Marks contributors in the top 50% of centrality 
+   as top-contributor (shown in red in the graph)
+5. Creates Cytoscape elements — nodes for contributors, 
+   edges for collaborations
+6. Shows bus factor score as text above the graph
+
+#### Why force-directed network (Cytoscape)?
+A network graph is the only chart type that shows 
+relationships between people. No table, bar chart, 
+or heatmap can show who works with whom. The 
+force-directed layout naturally clusters people 
+who collaborate frequently — they are pulled 
+together by their shared edges.
+
+#### Why separate repo dropdown?
+The network is inherently a single-repo visualization.
+Showing two repos' networks on the same graph would 
+be meaningless — contributors from different repos 
+don't collaborate with each other. So instead of 
+using the global multi-repo filter, it has its own 
+single-repo selector.
+
+#### Node colors
+- Blue nodes: regular contributors
+- Red nodes: top contributors (top 50% by centrality)
+  — these are the people whose departure would hurt 
+  the project most (related to bus factor)
+
+#### Edge thickness
+Thicker edges = more collaboration between those two 
+people. If two contributors reviewed each other's 
+PRs 27 times, their edge is thicker than two people 
+who co-commented only twice.
+
+#### Inputs it listens to
+- `network-repo-filter` dropdown (separate from global filter)
+
+---
+
+### `app/components/layout.py`
+**Assigned to: [Name]**
+
+#### What does this file do?
+This file defines the visual structure of the entire 
+page. It does not contain any data or chart logic — 
+it just arranges elements on the page.
+
+Think of it as the HTML skeleton of the app. Every 
+chart panel, every filter, every heading is defined 
+here.
+
+It has two functions:
+
+**create_filters()**
+Creates the global filter bar at the top of the page 
+with four controls:
+
+| Control | ID | What it does |
+|---------|-----|-------------|
+| Repo dropdown | `repo-filter` | Select multiple repos |
+| Ecosystem dropdown | `ecosystem-filter` | Filter to one ecosystem |
+| Date slider | `month-slider` | Select date range |
+| Bot toggle | `bot-toggle` | Include/exclude bots |
+
+**create_panels()**
+Creates the six visualization panels in a 3-row 
+2-column grid:
+
+| Row | Left Panel | Right Panel |
+|-----|-----------|-------------|
+| Row 1 | Streamgraph (`streamgraph`) | Network (`contributor-network`) |
+| Row 2 | PR Sankey (`pr-sankey`) | Issue Heatmap (`issue-heatmap`) |
+| Row 3 | Bot Bar (`bot-bar`) | Health Dashboard (`health-dashboard`) |
+
+#### Important — IDs must match exactly
+The IDs in layout.py must exactly match the Output 
+IDs in every callback file. If layout.py says 
+`id='bot-bar'` then bot_bar_cb.py must say 
+`Output('bot-bar', 'figure')`. Any mismatch causes 
+the app to crash.
+
+#### Special case — Network panel
+The network panel is different from the other five:
+- Uses `cyto.Cytoscape` instead of `dcc.Graph`
+- Has its own separate dropdown `network-repo-filter`
+- Has a text div `network-bus-factor-info` for 
+  showing bus factor score
+- Uses `dash_cytoscape` library which must be 
+  installed separately:
+```bash
+  pip3 install dash-cytoscape
+```
+
+#### Panel IDs reference
+
+| Panel | Component type | ID |
+|-------|---------------|-----|
+| Streamgraph | dcc.Graph | `streamgraph` |
+| Network graph | cyto.Cytoscape | `contributor-network` |
+| Network repo selector | dcc.Dropdown | `network-repo-filter` |
+| Bus factor text | html.Div | `network-bus-factor-info` |
+| PR Sankey | dcc.Graph | `pr-sankey` |
+| Issue Heatmap | dcc.Graph | `issue-heatmap` |
+| Bot Bar | dcc.Graph | `bot-bar` |
+| Health Dashboard | dcc.Graph | `health-dashboard` |
+
+---
 *Last updated: July 2026*  
 *Update the status table whenever a task is completed*

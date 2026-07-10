@@ -69,7 +69,7 @@ def load_issue_response(repos=None):
     """
     Load precomputed issue response time data.
     Columns: repo, issue_number, opened_at, 
-             first_comment_at, response_hours
+             first_comment_at, response_time_hours
     """
     df = pd.read_csv(os.path.join(FEATURES_DIR, 'issue_response.csv'))
     if repos:

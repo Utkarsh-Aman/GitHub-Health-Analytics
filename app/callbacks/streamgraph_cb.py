@@ -9,7 +9,7 @@ growth/decline in ecosystem activity over 2023-2024 is easy to read.
 
 Data source: features/bot_activity.csv, via src.data_loader.load_bot_activity.
 Bot events (is_bot == 1) are excluded since this panel is about human
-adoption/engagement, not automation volume (that's covered by bot-bar_cb).
+adoption/engagement, not automation volume (that's covered by bot_bar_cb).
 """
 
 import os
@@ -24,7 +24,6 @@ import plotly.graph_objects as go
 import plotly.express as px
 from dash import Input, Output
 
-from app.app import app
 from src.data_loader import load_bot_activity
 
 ECOSYSTEM_COLORS = {
@@ -122,18 +121,19 @@ def build_streamgraph_figure(df: pd.DataFrame) -> go.Figure:
     return fig
 
 
-@app.callback(
-    Output("streamgraph", "figure"),
-    Input("repo-filter", "value"),
-    Input("ecosystem-filter", "value"),
-)
-def update_streamgraph(selected_repos, selected_ecosystem):
-    """
-    Rebuilds the streamgraph whenever the global repo or ecosystem filters change.
-    """
-    df = load_bot_activity(repos=selected_repos if selected_repos else None)
+def register(app):
+    @app.callback(
+        Output("streamgraph", "figure"),
+        Input("repo-filter", "value"),
+        Input("ecosystem-filter", "value"),
+    )
+    def update_streamgraph(selected_repos, selected_ecosystem):
+        """
+        Rebuilds the streamgraph whenever the global repo or ecosystem filters change.
+        """
+        df = load_bot_activity(repos=selected_repos if selected_repos else None)
 
-    if selected_ecosystem:
-        df = df[df["ecosystem"] == selected_ecosystem]
+        if selected_ecosystem:
+            df = df[df["ecosystem"] == selected_ecosystem]
 
-    return build_streamgraph_figure(df)
+        return build_streamgraph_figure(df)

@@ -33,7 +33,6 @@ if BASE_DIR not in sys.path:
 import pandas as pd
 from dash import Input, Output, html
 
-from app.app import app
 from src.data_loader import load_contributor_network, load_bus_factor
 
 
@@ -105,30 +104,31 @@ def build_bus_factor_summary(repo: str, edges_df: pd.DataFrame) -> html.Div:
     ])
 
 
-@app.callback(
-    Output("contributor-network", "elements"),
-    Output("network-bus-factor-info", "children"),
-    Input("network-repo-filter", "value"),
-)
-def update_network(selected_repo):
-    """
-    Rebuilds the contributor collaboration network when the single-repo
-    network dropdown changes.
-    """
-    if not selected_repo:
-        return [], html.Div(
-            "Select a repository above to view its contributor network.",
-            style={"color": "gray"},
-        )
+def register(app):
+    @app.callback(
+        Output("contributor-network", "elements"),
+        Output("network-bus-factor-info", "children"),
+        Input("network-repo-filter", "value"),
+    )
+    def update_network(selected_repo):
+        """
+        Rebuilds the contributor collaboration network when the single-repo
+        network dropdown changes.
+        """
+        if not selected_repo:
+            return [], html.Div(
+                "Select a repository above to view its contributor network.",
+                style={"color": "gray"},
+            )
 
-    edges_df = load_contributor_network(selected_repo)
+        edges_df = load_contributor_network(selected_repo)
 
-    if edges_df.empty:
-        return [], html.Div(
-            f"No collaboration data available for {selected_repo}.",
-            style={"color": "gray"},
-        )
+        if edges_df.empty:
+            return [], html.Div(
+                f"No collaboration data available for {selected_repo}.",
+                style={"color": "gray"},
+            )
 
-    elements = build_network_elements(edges_df)
-    summary = build_bus_factor_summary(selected_repo, edges_df)
-    return elements, summary
+        elements = build_network_elements(edges_df)
+        summary = build_bus_factor_summary(selected_repo, edges_df)
+        return elements, summary
