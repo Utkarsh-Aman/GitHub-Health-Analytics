@@ -53,8 +53,7 @@ def register(app):
             ))
             
         fig.update_layout(
-            title="Technology Adoption Trends", xaxis_title="Month",
-            yaxis=dict(showticklabels=False, title=None), template="plotly_white",
-            hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), margin=dict(t=60, b=40, l=20, r=20)
+            xaxis=dict(title=None), yaxis=dict(showticklabels=False, title=None), template="plotly_white",
+            hovermode="x unified", legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1), margin=dict(t=25, b=20, l=10, r=10)
         )
         return fig

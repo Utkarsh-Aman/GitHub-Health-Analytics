@@ -1,7 +1,9 @@
 from dash import Input, Output
 import plotly.graph_objects as go
+import plotly.express as px
 import pandas as pd
 from src.data_loader import load_bot_activity
+from src.analytics import apply_millers_law
 from app.components.filters import get_month_range
 
 def register(app):
@@ -12,13 +14,11 @@ def register(app):
     def update_bot_bar(selected_repos, month_range):
         start_month, end_month = get_month_range(month_range)
         
-        df = load_bot_activity(selected_repos)
+        df = load_bot_activity(selected_repos, start_month=start_month, end_month=end_month)
         if df.empty:
-            return go.Figure(layout=dict(title="No activity data found matching filters"))
+            return go.Figure(layout=dict(title="No data found matching filters"))
             
-        df = df[(df['year_month'] >= start_month) & (df['year_month'] <= end_month)]
-        if df.empty:
-            return go.Figure(layout=dict(title="No activity data found in selected month range"))
+        df = apply_millers_law(df, selected_repos)
             
         grouped = df.groupby(['repo', 'is_bot'])['event_count'].sum().reset_index()
         pivot_df = grouped.pivot(index='repo', columns='is_bot', values='event_count').fillna(0)
@@ -35,9 +35,7 @@ def register(app):
         fig.add_trace(go.Bar(x=pivot_df.index, y=human_events, name='Human Activity', marker_color='#1f77b4'))
         fig.add_trace(go.Bar(x=pivot_df.index, y=bot_events, name='Bot Activity', marker_color='#d62728'))
         
-        fig.update_layout(
-            barmode='stack', title='Bot vs. Human Activity Volume',
-            xaxis_title='Repository', yaxis_title='Total Event Count',
-            template='plotly_white', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        fig.update_layout(margin=dict(t=25, b=20, l=10, r=10), 
+            barmode='stack', template='plotly_white', legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
         )
         return fig

@@ -33,7 +33,8 @@ from app.callbacks import (
     sankey_cb,
     heatmap_cb,
     bot_bar_cb,
-    dashboard_cb
+    dashboard_cb,
+    modal_cb
 )
 
 streamgraph_cb.register(app)
@@ -42,6 +43,7 @@ sankey_cb.register(app)
 heatmap_cb.register(app)
 bot_bar_cb.register(app)
 dashboard_cb.register(app)
+modal_cb.register(app)
 
 if __name__ == '__main__':
     app.run(debug=True)

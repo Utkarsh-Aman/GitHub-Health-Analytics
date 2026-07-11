@@ -8,12 +8,14 @@ from app.components.filters import get_month_range
 def register(app):
     @app.callback(
         Output('issue-heatmap', 'figure'),
-        [Input('repo-filter', 'value'), Input('month-slider', 'value')]
+        [Input('repo-filter', 'value'),
+         Input('month-slider', 'value'),
+         Input('bot-toggle', 'value')]
     )
-    def update_issue_heatmap(selected_repos, month_range):
+    def update_issue_heatmap(selected_repos, month_range, include_bots):
         start_month, end_month = get_month_range(month_range)
         
-        df = load_events(repos=selected_repos, start_month=start_month, end_month=end_month)
+        df = load_events(repos=selected_repos, start_month=start_month, end_month=end_month, include_bots=bool(include_bots))
         if df.empty:
             return go.Figure(layout=dict(title="No data found matching filters"))
             
@@ -48,10 +50,9 @@ def register(app):
             hovertemplate='Date: %{customdata}<br>Issues Opened: %{z}<extra></extra>', customdata=customdata_dates
         ))
         
-        fig.update_layout(
-            title='Issue Responsiveness Calendar Heatmap',
+        fig.update_layout(margin=dict(t=25, b=20, l=10, r=10), 
             xaxis=dict(tickmode='array', tickvals=monthly_ticks['week_index'], ticktext=monthly_ticks['date'].dt.strftime('%Y-%m'), showgrid=False),
             yaxis=dict(autorange='reversed', showgrid=False),
-            template='plotly_white', height=280
+            template='plotly_white'
         )
         return fig

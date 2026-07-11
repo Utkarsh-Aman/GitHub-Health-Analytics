@@ -1,6 +1,13 @@
 import pandas as pd
 import os
 import sys
+from functools import lru_cache
+import threading
+
+_events_lock = threading.Lock()
+_pr_lock = threading.Lock()
+_issue_lock = threading.Lock()
+_bot_lock = threading.Lock()
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -23,6 +30,12 @@ def load_events(repos=None, ecosystem=None,
 
     Returns: pandas DataFrame
     """
+    repos_tuple = tuple(repos) if repos else None
+    with _events_lock:
+        return _load_events_cached(repos_tuple, ecosystem, start_month, end_month, include_bots)
+
+@lru_cache(maxsize=32)
+def _load_events_cached(repos, ecosystem, start_month, end_month, include_bots):
     conn = get_connection()
     conditions = ["1=1"]
     params = []
@@ -54,37 +67,63 @@ def load_events(repos=None, ecosystem=None,
 
 
 # Feature tables — read directly from CSV files
-def load_pr_latency(repos=None):
+def load_pr_latency(repos=None, start_month=None, end_month=None):
     """
-    Load precomputed PR latency data.
-    Columns: repo, pr_number, opened_at, merged_at, latency_hours
+    Load precomputed PR latency data with time filtering.
     """
+    repos_tuple = tuple(repos) if repos else None
+    with _pr_lock:
+        return _load_pr_latency_cached(repos_tuple, start_month, end_month)
+
+@lru_cache(maxsize=32)
+def _load_pr_latency_cached(repos, start_month, end_month):
     df = pd.read_csv(os.path.join(FEATURES_DIR, 'pr_latency.csv'))
     if repos:
         df = df[df['repo'].isin(repos)]
+    if start_month:
+        df = df[df['month'] >= start_month]
+    if end_month:
+        df = df[df['month'] <= end_month]
     return df
 
 
-def load_issue_response(repos=None):
+def load_issue_response(repos=None, start_month=None, end_month=None):
     """
-    Load precomputed issue response time data.
-    Columns: repo, issue_number, opened_at, 
-             first_comment_at, response_time_hours
+    Load precomputed issue response time data with time filtering.
     """
+    repos_tuple = tuple(repos) if repos else None
+    with _issue_lock:
+        return _load_issue_response_cached(repos_tuple, start_month, end_month)
+
+@lru_cache(maxsize=32)
+def _load_issue_response_cached(repos, start_month, end_month):
     df = pd.read_csv(os.path.join(FEATURES_DIR, 'issue_response.csv'))
     if repos:
         df = df[df['repo'].isin(repos)]
+    if start_month:
+        df = df[df['year_month'] >= start_month]
+    if end_month:
+        df = df[df['year_month'] <= end_month]
     return df
 
 
-def load_bot_activity(repos=None):
+def load_bot_activity(repos=None, start_month=None, end_month=None):
     """
-    Load precomputed bot vs human activity data.
-    Columns: repo, year_month, bot_events, human_events
+    Load precomputed bot vs human activity data with time filtering.
     """
+    repos_tuple = tuple(repos) if repos else None
+    with _bot_lock:
+        return _load_bot_activity_cached(repos_tuple, start_month, end_month)
+
+@lru_cache(maxsize=32)
+def _load_bot_activity_cached(repos, start_month, end_month):
     df = pd.read_csv(os.path.join(FEATURES_DIR, 'bot_activity.csv'))
     if repos:
         df = df[df['repo'].isin(repos)]
+    if start_month:
+        df = df[df['year_month'] >= start_month]
+    if end_month:
+        df = df[df['year_month'] <= end_month]
     return df
 
 

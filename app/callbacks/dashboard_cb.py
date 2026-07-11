@@ -2,7 +2,8 @@ from dash import Input, Output
 import plotly.graph_objects as go
 import pandas as pd
 from src.data_loader import load_pr_latency, load_issue_response, load_bot_activity, load_bus_factor
-from src.analytics import compute_health_summary
+from src.analytics import compute_health_summary, apply_millers_law
+from app.components.filters import get_month_range
 
 def _fmt(val, suffix=''):
     return 'N/A' if pd.isna(val) else f"{val}{suffix}"
@@ -10,18 +11,27 @@ def _fmt(val, suffix=''):
 def register(app):
     @app.callback(
         Output('health-dashboard', 'figure'),
-        Input('repo-filter', 'value')
+        [Input('repo-filter', 'value'),
+         Input('month-slider', 'value'),
+         Input('bot-toggle', 'value')]
     )
-    def update_health_dashboard(selected_repos):
+    def update_health_dashboard(selected_repos, month_range, include_bots):
         if not selected_repos:
             return go.Figure(layout=dict(title="Select at least one repository to view its health summary"))
 
-        pr_df = load_pr_latency(selected_repos)
-        issue_df = load_issue_response(selected_repos)
-        bot_df = load_bot_activity(selected_repos)
-        bf_df = load_bus_factor(selected_repos)
-
-        summary = compute_health_summary(selected_repos, pr_df, issue_df, bot_df, bf_df)
+        start_month, end_month = get_month_range(month_range)
+        
+        if len(selected_repos) > 7:
+            effective_repos = selected_repos[:7] + ['Other (aggregate)']
+        else:
+            effective_repos = selected_repos
+            
+        pr_df = apply_millers_law(load_pr_latency(selected_repos, start_month=start_month, end_month=end_month), selected_repos)
+        issue_df = apply_millers_law(load_issue_response(selected_repos, start_month=start_month, end_month=end_month), selected_repos)
+        bot_df = apply_millers_law(load_bot_activity(selected_repos, start_month=start_month, end_month=end_month), selected_repos)
+        bf_df = apply_millers_law(load_bus_factor(selected_repos), selected_repos)
+        
+        summary = compute_health_summary(effective_repos, pr_df, issue_df, bot_df, bf_df)
         
         if summary.empty:
             return go.Figure(layout=dict(title="No data found for the selected repositories"))
@@ -44,5 +54,5 @@ def register(app):
             ),
             cells=dict(values=col_values, fill_color=[row_colors] * len(col_values), align='left')
         )])
-        fig.update_layout(title='Repository Health Summary', template='plotly_white', margin=dict(t=50, b=20, l=20, r=20))
+        fig.update_layout(template='plotly_white', margin=dict(t=25, b=20, l=10, r=10))
         return fig

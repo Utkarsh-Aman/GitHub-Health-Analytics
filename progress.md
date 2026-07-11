@@ -1770,3 +1770,67 @@ The dashboard is laid out in a 3-row, 2-column grid. Each panel is designed to a
 ---
 *Last updated: July 2026*  
 *Update the status table whenever a task is completed*
+
+---
+
+## 10. Dashboard App Architecture (`app/app.py`)
+
+The main entry point of our dashboard is `app/app.py`. It initializes the Plotly Dash application and ties everything together.
+- It loads global configurations and data structures from `app/globals.py`.
+- It defines the main web page layout by importing `create_filters()` and `create_panels()` from `app/components/layout.py`.
+- It connects the interactive logic by registering the callback functions from `app/callbacks/`.
+- It runs the local Flask server to host the dashboard on port 8050.
+
+---
+
+## 11. Performance Optimizations & Filtering
+
+### The Problem
+Initially, the dashboard was slow because every time a filter was changed, the app would query the SQLite database and re-calculate all metrics from millions of rows. Additionally, some charts were entirely static and did not respond to the date range slider or bot toggle.
+
+### What We Fixed (And Removed Old Approaches)
+We abandoned the idea of changing the timeline slider into dropdowns, keeping the smooth slider interaction intact. Instead, we implemented internal optimizations:
+1. **Dynamic Data Functions**: We updated `src/data_loader.py` to natively accept `start_month` and `end_month` parameters for all CSV data (like `pr_latency.csv`, `bot_activity.csv`), filtering them efficiently in memory before they hit the chart callbacks.
+2. **Instant Caching**: We wrapped all data loading functions with Python's `@lru_cache`. Now, when the user drags the slider, the data is loaded and filtered exactly once. All 6 charts then instantly retrieve the exact same pre-filtered dataset from memory, completely eliminating lag and redundant disk I/O.
+3. **Dynamic Bus Factor**: We threw out the static `bus_factor.csv` entirely. We wrote `compute_dynamic_bus_factor` in `src/analytics.py` which calculates the bus factor instantly in-memory from the raw events data, making it perfectly responsive to the timeline slider and bot toggle.
+
+---
+
+## 12. App User Guide
+
+Here is a clear explanation of how to use our interactive dashboard and what each component represents.
+
+### The Filters (Top Bar)
+- **Repositories**: Select one or multiple repositories to compare or aggregate their data.
+- **Ecosystem**: Filter repositories by their domain (Frontend, ML/Data, Backend/DevOps).
+- **Date Range Slider**: Drag the handles to select a specific time window (from Jan 2023 to Dec 2024). All charts instantly update to reflect only the data from this period.
+- **Bots (Include/Exclude)**: Toggle to either hide or show automated bot activity. Excluding bots reveals the true human developer metrics.
+
+### The Visualizations (6 Panels)
+1. **Technology Adoption Trends (Streamgraph)**: Shows the relative activity volume of each ecosystem over time. Useful for identifying if a domain (like ML) is suddenly growing faster than others.
+2. **Contributor Collaboration Network (Force-Directed Graph)**: Maps out who is talking to whom on PRs and issues. Nodes are contributors; lines are collaborations. Red nodes highlight critical "linchpin" developers (high bus factor risk).
+3. **PR Lifecycle and Review Latency (Sankey & Box Plot)**: The Sankey diagram visually tracks the flow of Pull Requests from "Opened" to either "Merged" or "Closed without Merge". The accompanying Box Plot shows the distribution of hours it takes for PRs to get merged, identifying bottlenecks.
+4. **Issue Responsiveness (Calendar Heatmap)**: Displays the daily volume of issues opened. Gaps (white squares) indicate days with zero activity, helping you spot maintainer burnout or abandoned periods.
+5. **Bot vs Human Activity (Stacked Bar Chart)**: Compares the sheer volume of automated bot events against real human events across the selected repositories.
+6. **Repository Health Dashboard (Table)**: A concise scorecard summarizing the median PR merge times, issue response times, bus factor, and bot percentage side-by-side.
+
+
+## 13. Professor Feedback & Visual Refinements (Checkpoint 10 Updates)
+
+Following feedback from the professor regarding HCI principles and data visualization best practices, we implemented several major refinements to the dashboard:
+
+### 1. Shneiderman's Mantra (Overview first, zoom/filter, details-on-demand)
+**The Problem:** The original dashboard required a lot of vertical scrolling, and showing 6 massive charts simultaneously made it hard to focus.
+**The Fix:** We completely rebuilt the layout into a compact, single-viewport "Overview" grid. We added an "Expand" button to every single chart. When clicked, it opens a full-screen interactive Modal (using `modal_cb.py`), allowing the user to get "details-on-demand" without cluttering the main screen.
+
+### 2. Miller's Law (7±2) & Chart Junk Prevention
+**The Problem:** The global dropdown allowed users to select all 30 repositories at once, causing the charts to become an unreadable mess of overlapping colors and labels (chart junk).
+**The Fix:** We implemented `apply_millers_law` in `analytics.py`. Now, if a user selects more than 7 repositories, the dashboard automatically preserves the top 7 and aggregates the rest into an "Other (aggregate)" bucket. This ensures the charts remain cognitively digestible.
+
+### 3. Consistent Visual Encoding (Gestalt Principles)
+**The Problem:** The Box Plot for PR latency was assigning a single generic blue color (`#1f77b4`) to every repository, completely violating consistent visual encoding because repositories had specific assigned colors in the Streamgraph and other charts. Furthermore, extreme outliers were causing hundreds of hover tooltips to overlap, making the chart unreadable.
+**The Fix:** We refactored `sankey_cb.py` to use Plotly Express, ensuring each repository is automatically assigned a distinct and consistent color. We applied a logarithmic scale (`type='log'`) to the y-axis to handle extreme outliers gracefully, and we configured `hoveron='boxes'` so users get a clean, single summary tooltip instead of hundreds of overlapping labels.
+
+### 4. Contributor Network "Hairball" Fix
+**The Problem:** Combining multiple large repositories (like PyTorch and React) into the Cytoscape force-directed graph created a chaotic "hairball" where hundreds of text labels overlapped each other, hiding the true bus factor risk.
+**The Fix:** We reduced the maximum edge count from 500 down to 150 to strip away noise. More importantly, we updated `modal_cb.py` to dynamically recalculate degree centrality when the modal opens. We used this to apply the `.top-contributor` CSS class to only the highest-centrality nodes. As a result, only the core maintainers are rendered as giant red nodes with text labels, while the hundreds of minor contributors are rendered as small, anonymous blue dots, instantly clarifying the network structure.

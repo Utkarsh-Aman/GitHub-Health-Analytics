@@ -5,13 +5,12 @@ Drives the "Contributor Collaboration Network" panel:
   - cyto.Cytoscape(id='contributor-network')
   - html.Div(id='network-bus-factor-info')
 
-Unlike the other panels, this graph is inherently single-repo (edges are
-computed per-repo), so it listens to a dedicated 'network-repo-filter'
-dropdown rather than the global multi-select 'repo-filter'.
+Unlike the other panels, this graph can become a messy hairball with multiple repos, but it now listens to the global multi-select 'repo-filter' and aggregates edges across them.
 
 Data sources:
-  - features/contributor_network.csv, via src.data_loader.load_contributor_network
-    columns: repo, source, target, weight, source_centrality, target_centrality
+  - SQLite database, via src.data_loader.load_events
+    Processed via src.analytics.compute_dynamic_network
+    columns: source, target, weight, source_centrality, target_centrality
   - features/bus_factor.csv, via src.data_loader.load_bus_factor
     columns: repo, bus_factor, total_contributors, total_activity
 
@@ -33,7 +32,9 @@ if BASE_DIR not in sys.path:
 import pandas as pd
 from dash import Input, Output, html
 
-from src.data_loader import load_contributor_network, load_bus_factor
+from src.data_loader import load_events, load_bus_factor
+from src.analytics import compute_dynamic_network
+from app.components.filters import get_month_range
 
 
 def _node_centrality_map(edges_df: pd.DataFrame) -> dict:
@@ -83,17 +84,18 @@ def build_network_elements(edges_df: pd.DataFrame) -> list:
     return elements
 
 
-def build_bus_factor_summary(repo: str, edges_df: pd.DataFrame) -> html.Div:
+def build_bus_factor_summary(repos: list, edges_df: pd.DataFrame) -> html.Div:
     """Small text summary shown alongside the network graph."""
-    bus_df = load_bus_factor(repos=[repo])
+    bus_df = load_bus_factor(repos)
 
     if bus_df.empty:
         bus_factor_text = "Bus factor: N/A"
         contributors_text = ""
     else:
-        row = bus_df.iloc[0]
-        bus_factor_text = f"Bus factor: {int(row['bus_factor'])}"
-        contributors_text = f"Total contributors: {int(row['total_contributors'])}"
+        avg_bf = int(bus_df['bus_factor'].mean())
+        tot_c = int(bus_df['total_contributors'].sum())
+        bus_factor_text = f"Avg Bus factor: {avg_bf}"
+        contributors_text = f"Total contributors: {tot_c}"
 
     edges_text = f"Collaboration edges shown: {len(edges_df)}"
 
@@ -108,27 +110,37 @@ def register(app):
     @app.callback(
         Output("contributor-network", "elements"),
         Output("network-bus-factor-info", "children"),
-        Input("network-repo-filter", "value"),
+        [Input("repo-filter", "value"),
+         Input("month-slider", "value"),
+         Input("bot-toggle", "value")]
     )
-    def update_network(selected_repo):
+    def update_network(selected_repos, month_range, include_bots):
         """
-        Rebuilds the contributor collaboration network when the single-repo
-        network dropdown changes.
+        Rebuilds the contributor collaboration network when filters change.
         """
-        if not selected_repo:
+        if not selected_repos:
             return [], html.Div(
                 "Select a repository above to view its contributor network.",
                 style={"color": "gray"},
             )
 
-        edges_df = load_contributor_network(selected_repo)
+        start_month, end_month = get_month_range(month_range)
+        events_df = load_events(repos=selected_repos, start_month=start_month, end_month=end_month, include_bots=bool(include_bots))
+
+        if events_df.empty:
+            return [], html.Div(
+                f"No collaboration data available for selected repos.",
+                style={"color": "gray"},
+            )
+
+        edges_df = compute_dynamic_network(events_df)
 
         if edges_df.empty:
             return [], html.Div(
-                f"No collaboration data available for {selected_repo}.",
+                f"Not enough collaborations to build a network.",
                 style={"color": "gray"},
             )
 
         elements = build_network_elements(edges_df)
-        summary = build_bus_factor_summary(selected_repo, edges_df)
+        summary = build_bus_factor_summary(selected_repos, edges_df)
         return elements, summary
