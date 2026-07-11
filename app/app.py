@@ -24,7 +24,15 @@ app.title = "GitHub Repository Health Analytics"
 app.layout = html.Div([
     create_filters(),
     create_panels()
-])
+], style={
+    'backgroundColor': '#f1f5f9', 
+    'height': '100vh', 
+    'padding': '10px', 
+    'margin': '-8px', # Negates default body margin
+    'boxSizing': 'border-box',
+    'overflow': 'hidden',
+    'fontFamily': 'system-ui, -apple-system, sans-serif'
+})
 
 # Register callbacks
 from app.callbacks import (

@@ -119,9 +119,12 @@ def create_filters():
 
         ], style={
             'padding': '10px 15px',
-            'backgroundColor': '#f5f5f5',
+            'backgroundColor': '#ffffff',
             'borderRadius': '5px',
-            'marginBottom': '10px'
+            'marginBottom': '10px',
+            'boxShadow': '0 1px 3px rgba(0,0,0,0.1)',
+            'marginLeft': '5px',
+            'marginRight': '5px'
         })
     ])
 
@@ -131,25 +134,26 @@ def create_panels():
     Six visualization panels in a 2 row x 3 column grid for overview.
     """
     panel_style_base = {
-        'display': 'inline-block',
-        'verticalAlign': 'top',
         'padding': '10px',
         'boxSizing': 'border-box',
         'backgroundColor': '#ffffff',
         'borderRadius': '5px',
         'boxShadow': '0 1px 3px rgba(0,0,0,0.1)',
-        'margin': '5px'
+        'margin': '5px',
+        'display': 'flex',
+        'flexDirection': 'column',
+        'justifyContent': 'space-between'
     }
     
-    panel_style_left = {**panel_style_base, 'width': '30%'}
-    panel_style_mid = {**panel_style_base, 'width': '26%'}
-    panel_style_right = {**panel_style_base, 'width': '39%'}
+    panel_style_left = {**panel_style_base, 'width': 'calc(32% - 10px)'}
+    panel_style_mid = {**panel_style_base, 'width': 'calc(28% - 10px)'}
+    panel_style_right = {**panel_style_base, 'width': 'calc(40% - 10px)'}
     
     header_style = {'marginBottom': '5px', 'display': 'inline-block', 'fontSize': '15px'}
     btn_style = {'float': 'right', 'cursor': 'pointer', 'border': 'none', 'background': '#f1f5f9', 'borderRadius': '3px', 'padding': '2px 8px', 'fontSize': '12px', 'fontWeight': 'bold', 'color': '#475569'}
     p_style = {'color': 'grey', 'fontSize': '11px', 'marginTop': '0px', 'marginBottom': '4px'}
     p_style_bottom = {'color': 'grey', 'fontSize': '11px', 'marginTop': '4px', 'marginBottom': '0px'}
-    graph_style = {'height': '240px'}
+    graph_style = {'height': '220px'}
 
     panels = html.Div([
 
@@ -175,7 +179,7 @@ def create_panels():
                 cyto.Cytoscape(
                     id='contributor-network',
                     layout={'name': 'cose'},
-                    style={'width': '100%', 'height': '260px'},
+                    style={'width': '100%', 'height': '220px'},
                     stylesheet=[
                         {'selector': 'node', 'style': {'font-size': '7px', 'width': '12px', 'height': '12px', 'background-color': '#4C78A8', 'color': '#333'}},
                         {'selector': '.top-contributor', 'style': {'label': 'data(label)', 'background-color': '#ef4444', 'width': '18px', 'height': '18px', 'font-size': '8px', 'font-weight': 'bold'}},
@@ -202,9 +206,7 @@ def create_panels():
                 html.P("Flow of PRs and review latency distribution", style=p_style_bottom)
             ], style=panel_style_right),
 
-        ]),
-
-        html.Br(),
+        ], style={'display': 'flex', 'flexWrap': 'wrap', 'marginLeft': '-5px', 'marginRight': '-5px', 'marginBottom': '10px'}),
 
         # ── Row 2 ──
         html.Div([
@@ -237,7 +239,7 @@ def create_panels():
                 dcc.Graph(id='health-dashboard', style=graph_style, config={'displayModeBar': False}),
                 html.P("Key metrics compared side by side", style=p_style_bottom)
             ], style=panel_style_right)
-        ]),
+        ], style={'display': 'flex', 'flexWrap': 'wrap', 'marginLeft': '-5px', 'marginRight': '-5px'}),
         
         # ── Modal Overlay ──
         html.Div(
