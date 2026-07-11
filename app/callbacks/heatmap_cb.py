@@ -51,7 +51,7 @@ def register(app):
         ))
         
         fig.update_layout(margin=dict(t=25, b=20, l=10, r=10), 
-            xaxis=dict(tickmode='array', tickvals=monthly_ticks['week_index'], ticktext=monthly_ticks['date'].dt.strftime('%Y-%m'), showgrid=False),
+            xaxis=dict(tickmode='array', tickvals=monthly_ticks['week_index'], ticktext=monthly_ticks['date'].dt.strftime('%b %Y'), showgrid=False),
             yaxis=dict(autorange='reversed', showgrid=False),
             template='plotly_white'
         )
