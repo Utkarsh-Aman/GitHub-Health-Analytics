@@ -5,3 +5,8 @@ gh_archive_data.csv
 __pycache__/
 .DS_Store
 *.pyc
+
+# Virtual Environment
+.venv/
+env/
+venv/

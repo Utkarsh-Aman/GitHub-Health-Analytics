@@ -36,23 +36,56 @@ def register(app):
         if summary.empty:
             return go.Figure(layout=dict(title="No data found for the selected repositories"))
 
-        col_values = [
-            list(summary['repo']),
-            [_fmt(v) for v in summary['median_merge_hours']],
-            [_fmt(v) for v in summary['median_response_hours']],
-            [_fmt(v) for v in summary['bus_factor']],
-            [_fmt(v, '%') for v in summary['bot_percentage']],
-        ]
+        import plotly.express as px
+        
+        # Ensure numeric types
+        for col in ['median_merge_hours', 'median_response_hours', 'bus_factor', 'bot_percentage']:
+            summary[col] = pd.to_numeric(summary[col], errors='coerce').fillna(0)
+        
+        # Max values for normalization
+        max_merge = summary['median_merge_hours'].max() or 1
+        max_resp = summary['median_response_hours'].max() or 1
+        max_bus = summary['bus_factor'].max() or 1
+        max_bot = summary['bot_percentage'].max() or 1
+        
+        fig = go.Figure()
+        colors = px.colors.qualitative.Plotly
+        
+        for i, row in summary.iterrows():
+            repo = row['repo']
+            # Normalize to 0-100 scale for plotting shape
+            norm_r = [
+                (row['median_merge_hours'] / max_merge) * 100,
+                (row['median_response_hours'] / max_resp) * 100,
+                (row['bus_factor'] / max_bus) * 100,
+                (row['bot_percentage'] / max_bot) * 100
+            ]
+            
+            # Hover text with real values
+            hover_text = [
+                f"Merge Latency: {row['median_merge_hours']:.1f} hrs",
+                f"Issue Response: {row['median_response_hours']:.1f} hrs",
+                f"Bus Factor: {row['bus_factor']}",
+                f"Bot Activity: {row['bot_percentage']:.1f}%"
+            ]
+            
+            fig.add_trace(go.Scatterpolar(
+                r=norm_r,
+                theta=['Merge Time', 'Response Time', 'Bus Factor', 'Bot %'],
+                fill='toself',
+                name=repo,
+                hoverinfo="name+text",
+                hovertext=hover_text,
+                line=dict(color=colors[i % len(colors)])
+            ))
 
-        n_rows = len(summary)
-        row_colors = ['#f9fafb' if i % 2 == 0 else '#ffffff' for i in range(n_rows)]
-
-        fig = go.Figure(data=[go.Table(
-            header=dict(
-                values=['Repository', 'Median Merge Time (hrs)', 'Median Issue Response (hrs)', 'Bus Factor', 'Bot Activity %'],
-                fill_color='#1f2937', font=dict(color='white', size=12), align='left'
+        fig.update_layout(
+            polar=dict(
+                radialaxis=dict(visible=False, range=[0, 100]),
             ),
-            cells=dict(values=col_values, fill_color=[row_colors] * len(col_values), align='left')
-        )])
-        fig.update_layout(template='plotly_white', margin=dict(t=25, b=20, l=10, r=10))
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=-0.2, xanchor="center", x=0.5, font=dict(size=10)),
+            margin=dict(t=25, b=20, l=25, r=25),
+            template='plotly_white'
+        )
         return fig

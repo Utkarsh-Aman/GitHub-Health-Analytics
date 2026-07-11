@@ -833,10 +833,11 @@ What to write:
 
 
 Visualization: Repository Health Summary Dashboard  
-Chart type: KPI table or indicator cards  
+Chart type: Radar Chart (Spider Chart)  
 Why this chart: Synthesizes all metrics into one 
 comparable view so users can evaluate repos side by 
-side in seconds.
+side in seconds. A radar chart allows visualizing multiple 
+metrics with different scales by normalizing them to a common scale, making it easy to compare repo health at a glance.
 
 Build this LAST — it depends on all other features 
 being ready in the database.
@@ -846,11 +847,13 @@ What to write:
 - Calls `load_pr_latency()`, `load_issue_response()`, 
   `load_bot_activity()`, `load_bus_factor()`
 - Calls `compute_health_summary()` from analytics.py
-- Builds a `go.Table` showing one row per repo with:
+- Normalizes metric values to 0-100 scale for plotting
+- Builds a `go.Scatterpolar` (Radar chart) per repo with:
   - Median merge time
   - Median issue response time  
   - Bus factor score
   - Bot activity percentage
+- Tooltips display the original raw values
 - Returns figure to `health-dashboard` output
 
 ---

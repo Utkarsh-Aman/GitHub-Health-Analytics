@@ -54,8 +54,11 @@ def register(app):
         fig.add_trace(go.Sankey(
             domain=dict(x=[0, 0.48], y=[0, 1]),
             node=dict(pad=15, thickness=20, line=dict(color="black", width=0.5), label=label, color=color),
-            link=dict(source=source, target=target, value=value, color=link_colors)
+            link=dict(source=source, target=target, value=value, color=link_colors),
+            textfont=dict(color="rgba(0,0,0,0)", size=1)
         ))
+        
+
         
         if not df_latency.empty:
             # Generate boxes for each selected repo to ensure consistent distinct colors
@@ -71,12 +74,15 @@ def register(app):
                 trace.yaxis = 'y2'
                 trace.hoveron = 'boxes' # Prevent overlapping outlier tooltips
                 trace.boxpoints = 'outliers'
+                trace.showlegend = False # Hide boxplot from legend to prioritize Sankey states
                 trace.name = trace.name.split('=')[-1] if trace.name else "Merge Latency"
                 fig.add_trace(trace)
             
-        fig.update_layout(margin=dict(t=25, b=20, l=10, r=10), 
-            xaxis2=dict(domain=[0.58, 1.0], title="Repository" if len(selected_repos) > 1 else "", showgrid=True),
-            yaxis2=dict(domain=[0, 1], anchor='x2', showgrid=True, type='log', title="Merge Latency (hours, log scale)"),
+        fig.update_layout(margin=dict(t=25, b=30, l=10, r=10), 
+            xaxis=dict(visible=False),
+            yaxis=dict(visible=False),
+            xaxis2=dict(domain=[0.60, 1.0], title="Repository" if len(selected_repos) > 1 else "", showgrid=True),
+            yaxis2=dict(domain=[0, 1], anchor='x2', showgrid=True, type='log', title="Merge Latency (hrs)"),
             template='plotly_white', showlegend=False
         )
         return fig
