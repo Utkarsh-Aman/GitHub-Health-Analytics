@@ -17,7 +17,7 @@ from dash import Dash, html, clientside_callback, Input, Output
 from app.components.layout import create_filters, create_panels
 
 # Initialize the Dash app
-app = Dash(__name__, assets_folder=os.path.join(BASE_DIR, 'assets'))
+app = Dash(__name__, assets_folder=os.path.join(BASE_DIR, 'assets'), suppress_callback_exceptions=True)
 app.title = "GitHub Repository Health Analytics"
 
 # Set app.layout using functions from layout.py
@@ -25,13 +25,6 @@ app.layout = html.Div([
     create_filters(),
     create_panels()
 ], id='theme-container', className='light-theme')
-
-@app.callback(
-    Output('theme-container', 'className'),
-    Input('theme-toggle', 'value')
-)
-def update_theme(theme):
-    return 'dark-theme' if theme == 'dark' else 'light-theme'
 
 # Register callbacks
 from app.callbacks import (

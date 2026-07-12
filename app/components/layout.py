@@ -91,7 +91,7 @@ def create_filters():
                     }
                 )
             ], style={
-                'width': '30%',
+                'width': '40%',
                 'display': 'inline-block',
                 'verticalAlign': 'top',
                 'paddingRight': '15px'
@@ -116,27 +116,6 @@ def create_filters():
                 'display': 'inline-block',
                 'verticalAlign': 'top'
             }),
-            
-            # Theme toggle
-            html.Div([
-                html.Label("Theme",
-                           style={'fontWeight': 'bold',
-                                  'marginBottom': '4px'}),
-                dcc.RadioItems(
-                    id='theme-toggle',
-                    options=[
-                        {'label': 'Light', 'value': 'light'},
-                        {'label': 'Dark', 'value': 'dark'}
-                    ],
-                    value='light',
-                    inline=False
-                )
-            ], style={
-                'width': '10%',
-                'display': 'inline-block',
-                'verticalAlign': 'top'
-            })
-
         ], style={
             'padding': '10px 15px',
             'backgroundColor': 'var(--card-bg)',
@@ -183,6 +162,16 @@ def create_panels():
             html.Div([
                 html.Div([
                     html.H4("Adoption Trends", style=header_style),
+                    dcc.RadioItems(
+                        id='streamgraph-group-by',
+                        options=[
+                            {'label': 'By Ecosystem', 'value': 'ecosystem'},
+                            {'label': 'By Repository', 'value': 'repo'}
+                        ],
+                        value='ecosystem',
+                        inline=True,
+                        style={'display': 'inline-block', 'marginLeft': '15px', 'fontSize': '12px', 'color': 'var(--text-muted)'}
+                    ),
                     html.Button("↗ Expand", id="btn-expand-streamgraph", style=btn_style)
                 ]),
                 html.P("Monthly human activity volume by ecosystem", style=p_style),
@@ -193,9 +182,17 @@ def create_panels():
             html.Div([
                 html.Div([
                     html.H4("Contributor Network", style=header_style),
+                    dcc.Dropdown(
+                        id='network-repo-filter',
+                        options=[{'label': r, 'value': r} for r in REPOS],
+                        value='facebook/react',
+                        clearable=False,
+                        style={'display': 'inline-block', 'marginLeft': '10px', 'fontSize': '11px', 'minWidth': '140px', 'verticalAlign': 'middle', 'color': 'var(--text-primary)'}
+                    ),
                     html.Button("↗ Expand", id="btn-expand-network", style=btn_style)
                 ]),
-                html.Div(id='network-bus-factor-info', style={'fontSize': '11px', 'color': '#555', 'marginBottom': '2px'}),
+                html.Div(id='network-bus-factor-info', style={'fontSize': '11px', 'color': 'var(--text-muted)', 'marginBottom': '2px', 'marginTop': '4px'}),
+                html.Div(id='network-hover-info', style={'minHeight': '15px', 'fontSize': '11px', 'color': 'var(--text-primary)', 'fontWeight': 'bold', 'marginBottom': '4px'}),
                 cyto.Cytoscape(
                     id='contributor-network',
                     layout={'name': 'cose'},
@@ -212,6 +209,13 @@ def create_panels():
             html.Div([
                 html.Div([
                     html.H4("PR Lifecycle & Latency", style=header_style),
+                    dcc.Dropdown(
+                        id='sankey-repo-filter',
+                        options=[{'label': 'All Selected', 'value': 'ALL'}] + [{'label': r, 'value': r} for r in REPOS],
+                        value='ALL',
+                        clearable=False,
+                        style={'display': 'inline-block', 'marginLeft': '10px', 'fontSize': '11px', 'minWidth': '140px', 'verticalAlign': 'middle', 'color': 'var(--text-primary)'}
+                    ),
                     html.Button("↗ Expand", id="btn-expand-sankey", style=btn_style)
                 ]),
                 dcc.Graph(id='pr-sankey', style=graph_style, config={'displayModeBar': False}),
@@ -237,7 +241,10 @@ def create_panels():
                     html.Button("↗ Expand", id="btn-expand-heatmap", style=btn_style)
                 ]),
                 html.P("Daily issue creation frequency", style=p_style),
-                dcc.Graph(id='issue-heatmap', style=graph_style, config={'displayModeBar': False})
+                html.Div(
+                    dcc.Graph(id='issue-heatmap', config={'displayModeBar': False}),
+                    style={'height': '220px', 'overflowY': 'auto', 'overflowX': 'hidden'}
+                )
             ], style=panel_style_left),
 
             # Panel 5 — Bot Bar Chart
@@ -299,9 +306,9 @@ def create_panels():
                                     "borderRadius": "4px", "fontWeight": "bold"
                                 }
                             ),
-                            html.H3("Detailed View", style={"marginTop": "0"})
+                            html.H3("Detailed View", id="modal-title", style={"marginTop": "0"})
                         ]),
-                        html.Div(id="modal-content", style={"flexGrow": "1", "marginTop": "15px", "position": "relative"})
+                        html.Div(id="modal-content", style={"flexGrow": "1", "marginTop": "15px", "position": "relative", "overflowY": "auto"})
                     ]
                 )
             ]
