@@ -10,15 +10,40 @@ efficiency, issue responsiveness, and technology adoption trends.
 ---
 
 ## Project Structure
-GitHub-Health-Analytics-CS661/
+
+```text
+GitHub-Health-Analytics/
 ├── app/
-│   └── app.py                  # Main Dash web application
-├── features/
-│   └── feature_engineering.py  # PR latency, bus factor, bot detection
+│   ├── app.py                  # Entry point of the Dash application
+│   ├── globals.py              # Shared database connection and global constants
+│   ├── callbacks/              # Chart callbacks for interactivity
+│   │   ├── bot_bar_cb.py       # Bot vs Human activity bar chart callback
+│   │   ├── dashboard_cb.py     # Health dashboard radar chart callback
+│   │   ├── heatmap_cb.py       # Issue responsiveness calendar heatmap callback
+│   │   ├── modal_cb.py         # Modal zoom expansion overlay callback
+│   │   ├── network_cb.py       # Contributor network callback
+│   │   ├── sankey_cb.py        # PR lifecycle Sankey and merge latency callback
+│   │   └── streamgraph_cb.py   # Technology adoption trends streamgraph callback
+│   └── components/             # Layout structure definitions
+│       ├── filters.py          # Shared filters layout (top bar)
+│       └── layout.py           # Main dashboard panels and modal layout
+├── assets/
+│   └── theme.css               # Styling definitions for light/dark themes
+├── features/                   # Feature extraction scripts and precomputed CSV files
+│   ├── bot_activity.csv / .py
+│   ├── bus_factor.csv / .py
+│   ├── contributor_network.csv / contributer_network.py
+│   ├── issue_response.csv / .py
+│   ├── pr_latency.csv / .py
+│   └── feature_engineering.py  # Orchestrates all feature calculations
 ├── preprocessing/
-│   └── clean_data.py           # Data cleaning and SQLite database creation
+│   └── clean_data.py           # Initial data cleaning and SQLite DB creation
+├── src/                        # Core backend loaders and analysis helpers
+│   ├── analytics.py            # Aggregations, calculations, and Miller's law logic
+│   └── data_loader.py          # Cache-supported data load queries
 ├── requirements.txt
 └── README.md
+```
 
 ---
 
@@ -28,13 +53,13 @@ GitHub-Health-Analytics-CS661/
 - **Size:** 485MB, 3.4 million rows
 - **Period:** January 2023 – December 2024
 - **Repositories:** 30 repos across 3 ecosystems
-  - Frontend: React, Vue, Svelte, Angular, Next.js, Tailwind, Material-UI, Bootstrap, React Native
+  - Frontend: React, Vue, Svelte, Angular, Next.js, Tailwind, Material-UI, Bootstrap, React Native, Flutter
   - ML/Data: PyTorch, TensorFlow, Keras, HuggingFace, DeepSpeed, Ray, scikit-learn, pandas, NumPy
   - Backend/DevOps: VSCode, Kubernetes, Go, Elasticsearch, Spark, Terraform, Ansible, FastAPI, Django, Flask, Docker Compose
 
 > The dataset file (`gh_archive_data.csv`) and database (`github_analytics.db`) 
 > are not included in this repository due to size limits.  
-> Download from: [Google Drive Link Here]
+> Download from: [Google Drive Link](https://drive.google.com/file/d/1HWRU4NNOxjwpM3wobOcTc_8-sYgwZpFD/view?usp=sharing)
 
 ---
 
@@ -86,12 +111,12 @@ Open your browser and go to: `http://127.0.0.1:8050`
 
 ## Visualizations
 
-1. **Technology Adoption Streamgraph** — Monthly activity trends across ecosystems
-2. **Contributor Collaboration Network** — Force-directed graph with bus-factor scoring
-3. **PR Lifecycle Sankey + Box Plots** — Code review stages and merge latency
-4. **Issue Responsiveness Heatmap** — Calendar heatmap of daily issue activity
-5. **Bot vs Human Activity** — Stacked bar chart with global bot toggle
-6. **Repository Health Dashboard** — KPI summary cards with cross-filtering
+1. **Technology Adoption Streamgraph** — Monthly activity volume trends across ecosystems or repositories.
+2. **Contributor Collaboration Network** — Cytoscape-rendered force-directed collaboration graph displaying contributor relationships with bus-factor highlights.
+3. **PR Lifecycle Sankey + Box Plots** — PR state flows (opened, reviewed, merged, closed) paired with logarithmic distribution box plots.
+4. **Issue Responsiveness Heatmap** — Aligned calendar heatmap subplots displaying daily issue creation frequency for selected repositories.
+5. **Bot vs Human Activity** — Stacked bar charts showing the proportion of automated vs human event actions.
+6. **Repository Health Dashboard** — Comparative radar charts displaying normalized scores across PR latency, response times, bus factors, and bot percentages.
 
 ---
 ## Course Details
