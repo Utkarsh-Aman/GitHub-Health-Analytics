@@ -67,16 +67,16 @@ def _load_events_cached(repos, ecosystem, start_month, end_month, include_bots):
 
 
 # Feature tables — read directly from CSV files
-def load_pr_latency(repos=None, start_month=None, end_month=None):
+def load_pr_latency(repos=None, start_month=None, end_month=None, include_bots=True):
     """
     Load precomputed PR latency data with time filtering.
     """
     repos_tuple = tuple(repos) if repos else None
     with _pr_lock:
-        return _load_pr_latency_cached(repos_tuple, start_month, end_month)
+        return _load_pr_latency_cached(repos_tuple, start_month, end_month, include_bots)
 
 @lru_cache(maxsize=32)
-def _load_pr_latency_cached(repos, start_month, end_month):
+def _load_pr_latency_cached(repos, start_month, end_month, include_bots):
     df = pd.read_csv(os.path.join(FEATURES_DIR, 'pr_latency.csv'))
     if repos:
         df = df[df['repo'].isin(repos)]
@@ -84,19 +84,21 @@ def _load_pr_latency_cached(repos, start_month, end_month):
         df = df[df['month'] >= start_month]
     if end_month:
         df = df[df['month'] <= end_month]
+    if not include_bots and 'is_bot' in df.columns:
+        df = df[df['is_bot'] == 0]
     return df
 
 
-def load_issue_response(repos=None, start_month=None, end_month=None):
+def load_issue_response(repos=None, start_month=None, end_month=None, include_bots=True):
     """
     Load precomputed issue response time data with time filtering.
     """
     repos_tuple = tuple(repos) if repos else None
     with _issue_lock:
-        return _load_issue_response_cached(repos_tuple, start_month, end_month)
+        return _load_issue_response_cached(repos_tuple, start_month, end_month, include_bots)
 
 @lru_cache(maxsize=32)
-def _load_issue_response_cached(repos, start_month, end_month):
+def _load_issue_response_cached(repos, start_month, end_month, include_bots):
     df = pd.read_csv(os.path.join(FEATURES_DIR, 'issue_response.csv'))
     if repos:
         df = df[df['repo'].isin(repos)]
@@ -104,22 +106,26 @@ def _load_issue_response_cached(repos, start_month, end_month):
         df = df[df['year_month'] >= start_month]
     if end_month:
         df = df[df['year_month'] <= end_month]
+    if not include_bots and 'is_bot' in df.columns:
+        df = df[df['is_bot'] == 0]
     return df
 
 
-def load_bot_activity(repos=None, start_month=None, end_month=None):
+def load_bot_activity(repos=None, ecosystem=None, start_month=None, end_month=None):
     """
     Load precomputed bot vs human activity data with time filtering.
     """
     repos_tuple = tuple(repos) if repos else None
     with _bot_lock:
-        return _load_bot_activity_cached(repos_tuple, start_month, end_month)
+        return _load_bot_activity_cached(repos_tuple, ecosystem, start_month, end_month)
 
 @lru_cache(maxsize=32)
-def _load_bot_activity_cached(repos, start_month, end_month):
+def _load_bot_activity_cached(repos, ecosystem, start_month, end_month):
     df = pd.read_csv(os.path.join(FEATURES_DIR, 'bot_activity.csv'))
     if repos:
         df = df[df['repo'].isin(repos)]
+    if ecosystem:
+        df = df[df['ecosystem'] == ecosystem]
     if start_month:
         df = df[df['year_month'] >= start_month]
     if end_month:

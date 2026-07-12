@@ -1837,3 +1837,156 @@ Following feedback from the professor regarding HCI principles and data visualiz
 ### 4. Contributor Network "Hairball" Fix
 **The Problem:** Combining multiple large repositories (like PyTorch and React) into the Cytoscape force-directed graph created a chaotic "hairball" where hundreds of text labels overlapped each other, hiding the true bus factor risk.
 **The Fix:** We reduced the maximum edge count from 500 down to 150 to strip away noise. More importantly, we updated `modal_cb.py` to dynamically recalculate degree centrality when the modal opens. We used this to apply the `.top-contributor` CSS class to only the highest-centrality nodes. As a result, only the core maintainers are rendered as giant red nodes with text labels, while the hundreds of minor contributors are rendered as small, anonymous blue dots, instantly clarifying the network structure.
+
+## 15. Final Polish & Data Accuracy Tweaks (Checkpoint 22-25)
+
+As we prepared the final version of the dashboard for the report, we made several critical improvements to ensure the data is accurate and the UI is intuitive:
+
+### 1. Radar Chart Transformation (Health Dashboard)
+**The Problem:** The old scorecard was just a text table, which made it hard to visually compare overall repository health at a glance. Furthermore, when time filters were applied, repositories with no data (e.g., 0 pull requests) were being filled with `0.0`, artificially scoring 100% on "lower is better" metrics like latency!
+**The Fix:** We completely replaced the table with an interactive Plotly Polar Radar Chart. To ensure the axes don't randomly scale when the date slider moves, we precomputed global bounds (`_global_sum`) at startup. We also explicitly handled `NaN` missing data — if a repository has no PRs, it correctly plots at 0% (the center) and the hover text explicitly reads "N/A (no PRs)" rather than faking a 0.0 hour latency. We also increased metric precision (e.g., `0.01 hrs`) to accurately reflect ultra-fast, automated workflows like Angular's without rounding them down to 0.
+
+### 2. Issue Responsiveness Heatmap Upgrades
+**The Problem:** While the heatmap showed issue volume, it was impossible to distinguish a "quiet day" (1-2 issues) from a "completely dead day" (0 issues) because they both rendered as dark purple on the Viridis scale. Also, finding the longest stretch of silence required manually counting tiny squares.
+**The Fix:** We injected dynamic summary stats directly into the subplot titles (e.g., `avg 3.2/day &middot; longest silence: 12 days`). Most importantly, we built a **custom continuous colorscale** that forcefully snaps any cell with exactly `0` issues to a distinct, flat gray (`#e2e8f0`). As soon as there is 1 issue, it resumes the standard Viridis scale. This makes true maintainer silence instantly visible as gray blocks. We also added a clear "Issues Opened" title to the colorbar.
+
+### 3. Dynamic Modal Context & UI Cleanup
+**The Problem:** We stripped redundant `layout.title` annotations from the Plotly charts to stop them from duplicating the HTML headers in the grid. But when users clicked "Expand" to view a chart in the full-screen modal, it lost its context and had no title at all.
+**The Fix:** Instead of hardcoding titles back into the charts, we updated `modal_cb.py` to dynamically inject the correct title string directly into the modal's DOM (`modal-title`). For single-repo charts (like the Sankey and Network graphs), the callback actively reads the current value of the repository filter dropdown and appends it to the title (e.g., "PR Lifecycle & Latency - facebook/react"), ensuring the user always knows exactly what data they are looking at in the expanded view. We also completely removed the unnecessary dark/light theme toggle to reclaim valuable screen real estate for the filters.
+
+## 16. Detailed Visualization Modules
+
+This section explains each visualization panel in the dashboard, detailing their purpose, design, backend logic, and the insights they provide.
+
+### 16.1. Technology Adoption Trends (Streamgraph) Tab
+The Streamgraph tab provides a macro-level temporal view of how different development ecosystems (Frontend, ML/Data, Backend/DevOps) are growing or shrinking relative to each other over time.
+
+**16.1.1. Visualization Overview**
+This chart displays a centered, flowing area graph (Streamgraph). The vertical thickness of each colored stream represents the total volume of human developer activity for that ecosystem during a given month.
+
+**16.1.2. Interaction and Controls**
+- **Date Slider:** Dynamically narrows the timeline.
+- **Bot Toggle:** Excludes automated events, ensuring the streams only reflect real human adoption.
+- **Hover Tooltips:** Reveal the exact event count for a specific ecosystem in a specific month.
+- **Expand Modal:** Opens the chart in full screen for detailed temporal inspection.
+
+**16.1.3. Design and Responsiveness**
+The chart uses Plotly's `scatter` trace with `stackgroup` enabled and `groupnorm='fraction'` (or raw values) to create the flowing aesthetic. It relies on the clean `plotly_white` theme to ensure the ecosystem colors pop.
+
+**16.1.4. Backend and Plot Logic**
+The callback `update_streamgraph` in `streamgraph_cb.py` handles the logic. It retrieves pre-filtered data from `src.data_loader`, aggregates the total event counts across repositories by their parent ecosystem, and plots the temporal progression.
+
+**16.1.5. Insights and Use Cases**
+- **Macro-Trend Identification:** Easily spot if ML/Data projects are experiencing a sudden surge in activity compared to Web Frontend projects.
+- **Seasonal Drops:** Visualize global holiday lulls across all tech stacks simultaneously.
+
+---
+
+### 16.2. Contributor Collaboration Network Tab
+This tab exposes the hidden social structure of an open-source project by mapping out who is talking to whom on Pull Requests and Issues.
+
+**16.2.1. Visualization Overview**
+A force-directed node graph where nodes represent human contributors and edges (connecting lines) represent a collaboration between them. 
+
+**16.2.2. Interaction and Controls**
+- **Dedicated Repo Filter:** Because network graphs cannot mix distinct communities, this tab has its own specific dropdown to select a single repository.
+- **Draggable Nodes:** Users can physically drag nodes to untangle dense clusters.
+- **Modal Expansion:** Triggers an automatic recalculation that highlights core maintainers (top 50% by centrality) in Red, while keeping minor contributors Blue.
+
+**16.2.3. Design and Responsiveness**
+Built using `dash_cytoscape`, the visualization uses a physics-based layout algorithm (`cose` or `circle`). Edge thickness visually encodes the frequency of collaboration—thicker lines mean two developers work together constantly.
+
+**16.2.4. Backend and Plot Logic**
+The `update_network` callback in `network_cb.py` processes raw event data to build a co-occurrence matrix. If two developers interact on the same PR or Issue, an edge is drawn. It also calculates and displays the project's **Bus Factor** (how many developers account for 50% of the commits) dynamically.
+
+**16.2.5. Insights and Use Cases**
+- **Bus Factor Risk:** Visually identifies if a project is a "hub and spoke" (highly dependent on one central red node) or a healthy, distributed web.
+- **Community Health:** A dense web indicates a highly collaborative community where contributors review each other's work.
+
+---
+
+### 16.3. PR Lifecycle & Latency Tab
+This dual-visualization tab tracks how efficiently a project processes code contributions, highlighting bottlenecks in the review cycle.
+
+**16.3.1. Visualization Overview**
+It features two components:
+- **Sankey Diagram:** Maps the flow of PRs from "Opened" into "Merged" or "Closed without Merge".
+- **Box Plot:** Shows the statistical distribution of merge times (in hours) for successful PRs.
+
+**16.3.2. Interaction and Controls**
+- **Hover Nodes:** Hovering over the Sankey flow reveals the exact drop-off percentage at each stage.
+- **Hover Boxes:** Hovering over the Box plot reveals the median, upper/lower quartiles, and maximum outliers.
+
+**16.3.3. Design and Responsiveness**
+The Box plot utilizes a logarithmic scale (`type='log'`) on the Y-axis to prevent extreme outliers (e.g., a PR merged after 2 years) from compressing the rest of the chart. Plotly Express is used to guarantee consistent color encoding across multiple selected repositories.
+
+**16.3.4. Backend and Plot Logic**
+The `update_sankey` callback in `sankey_cb.py` relies on `analytics.get_pr_stage_counts` to trace the lifecycle of every PR via `PullRequestEvent` and `IssueCommentEvent` timestamps. 
+
+**16.3.5. Insights and Use Cases**
+- **Welcomingness:** A massive flow toward "Closed without Merge" warns potential contributors that their code is likely to be rejected.
+- **Review Bottlenecks:** A high median merge time on the box plot indicates that maintainers are overwhelmed and PRs sit unreviewed for weeks.
+
+---
+
+### 16.4. Issue Responsiveness Heatmap Tab
+This tab visualizes the daily volume of issue activity, acting as a heartbeat monitor for project maintainers.
+
+**16.4.1. Visualization Overview**
+A GitHub-style calendar grid where each row is a day of the week and each column is a week in the year. The color intensity represents the number of issue events on that day.
+
+**16.4.2. Interaction and Controls**
+- **Hover Tooltips:** Display the exact date and issue count.
+- **Dynamic Subtitles:** Automatically calculates and displays the average issues per day and the longest streak of complete silence (zero issues).
+
+**16.4.3. Design and Responsiveness**
+The heatmap utilizes a custom continuous colorscale. Instead of a standard Viridis scale where 0 and 1 look identical, exactly `0` issues is hard-snapped to a flat gray (`#e2e8f0`). As soon as activity reaches 1, it resumes the vibrant color gradient.
+
+**16.4.4. Backend and Plot Logic**
+The `update_heatmap` callback in `heatmap_cb.py` aggregates all `IssuesEvent` occurrences by day. It calculates the `longest_silence` streak algorithmically before generating the subplots for each selected repository.
+
+**16.4.5. Insights and Use Cases**
+- **Maintainer Burnout:** Long, uninterrupted streaks of gray squares instantly reveal periods where maintainers abandoned the project or went on vacation.
+- **Activity Spikes:** Bright yellow spots correlate with major bug outbreaks or post-release issue floods.
+
+---
+
+### 16.5. Bot vs Human Activity Tab
+This tab acts as an integrity check against inflated open-source metrics driven by automation.
+
+**16.5.1. Visualization Overview**
+A stacked horizontal bar chart that visually separates the total volume of events generated by real Humans (Blue) versus automated Bots (Red) for each selected repository.
+
+**16.5.2. Interaction and Controls**
+- **Bot Toggle Linkage:** If the user globally disables bots, this chart seamlessly hides the Red bars, allowing pure human-to-human comparison.
+- **Hover Data:** Reveals the exact event counts and the calculated percentage breakdown.
+
+**16.5.3. Design and Responsiveness**
+The horizontal layout ensures repository names are easily readable on the Y-axis without overlapping, while the stark red/blue color contrast instantly communicates the automation ratio.
+
+**16.5.4. Backend and Plot Logic**
+The `update_bot_bar` callback in `bot_bar_cb.py` cross-references event actors against a known list of bot suffixes (e.g., `[bot]`, `-bot`) to classify and sum the activity volumes.
+
+**16.5.5. Insights and Use Cases**
+- **Metric Verification:** Prevents users from being fooled into adopting a framework that boasts "100,000 commits" when 90% of them were generated by dependabot.
+
+---
+
+### 16.6. Repository Health Dashboard Tab
+This tab serves as the ultimate executive summary, condensing complex health metrics into a single scannable graphic.
+
+**16.6.1. Visualization Overview**
+An interactive Plotly Polar Radar Chart comparing the selected repositories across four critical dimensions: Merge Time, Response Time, Bus Factor, and Bot Percentage.
+
+**16.6.2. Interaction and Controls**
+- **Missing Data Handling:** If a repo has no data (e.g., 0 PRs), it explicitly plots at 0% (center) and the tooltip reads "N/A" to prevent fake perfect scores.
+- **Hover Insights:** Translates the normalized 0-100% radar axes back into raw, high-precision metrics (e.g., "Merge Latency: 0.01 hrs").
+
+**16.6.3. Design and Responsiveness**
+The chart uses inverted normalization for latency metrics (where lower is better) so that a larger polygon universally indicates a healthier repository. The Min/Max bounds are precomputed globally (`G_MAX_MERGE`, etc.) at app startup so the radar axes remain locked and consistent, even as the user changes the date slider.
+
+**16.6.4. Backend and Plot Logic**
+The `update_health_dashboard` callback in `dashboard_cb.py` utilizes the `compute_health_summary` function in `analytics.py` to calculate medians and percentages, applying log transformations to gracefully normalize heavy-tailed latency data.
+
+**16.6.5. Insights and Use Cases**
+- **Executive Comparison:** Allows engineering managers to overlay 3 competing frameworks (e.g., React, Vue, Angular) and instantly see which one has the best overall health profile based on the shape of the radar polygon.

@@ -5,7 +5,7 @@ Drives the "Contributor Collaboration Network" panel:
   - cyto.Cytoscape(id='contributor-network')
   - html.Div(id='network-bus-factor-info')
 
-Unlike the other panels, this graph can become a messy hairball with multiple repos, but it now listens to the global multi-select 'repo-filter' and aggregates edges across them.
+Unlike the other panels, this graph can become a messy hairball with multiple repos, so it listens to its own single-select 'network-repo-filter' to show one repo at a time.
 
 Data sources:
   - SQLite database, via src.data_loader.load_events
@@ -67,6 +67,7 @@ def build_network_elements(edges_df: pd.DataFrame) -> list:
             "data": {
                 "id": actor,
                 "label": actor,
+                "tooltip": f"{actor} (Centrality: {round(cent, 3)})",
                 "centrality": round(cent, 4),
             },
             "classes": "top-contributor" if max_centrality and cent >= threshold else "",
@@ -97,12 +98,18 @@ def build_bus_factor_summary(repos: list, edges_df: pd.DataFrame) -> html.Div:
         bus_factor_text = f"Avg Bus factor: {avg_bf}"
         contributors_text = f"Total contributors: {tot_c}"
 
-    edges_text = f"Collaboration edges shown: {len(edges_df)}"
+    edges_text = f"Showing top {len(edges_df)} strongest collaboration edges"
 
     return html.Div([
-        html.Span(bus_factor_text, style={"marginRight": "16px", "fontWeight": "bold"}),
-        html.Span(contributors_text, style={"marginRight": "16px"}),
-        html.Span(edges_text),
+        html.Div([
+            html.Span(bus_factor_text, style={"marginRight": "16px", "fontWeight": "bold"}),
+            html.Span(contributors_text, style={"marginRight": "16px"}),
+            html.Span(edges_text),
+        ], style={"whiteSpace": "nowrap", "overflow": "hidden", "textOverflow": "ellipsis"}),
+        html.Div([
+            html.Span("🔴 Top contributor (bus factor risk)", style={"marginRight": "15px"}),
+            html.Span("🔵 Regular contributor")
+        ], style={"marginTop": "6px", "fontSize": "10px", "color": "gray"})
     ])
 
 
@@ -111,33 +118,34 @@ def register(app):
         Output("contributor-network", "elements"),
         Output("network-bus-factor-info", "children"),
         Output("contributor-network", "stylesheet"),
-        [Input("repo-filter", "value"),
+        [Input("network-repo-filter", "value"),
          Input("month-slider", "value"),
-         Input("bot-toggle", "value"),
-         Input("theme-toggle", "value")]
+         Input("bot-toggle", "value")]
     )
-    def update_network(selected_repos, month_range, include_bots, theme):
+    def update_network(selected_repo, month_range, include_bots):
         """
         Rebuilds the contributor collaboration network when filters change.
         """
         base_stylesheet = [
-            {'selector': 'node', 'style': {'font-size': '7px', 'width': '12px', 'height': '12px', 'background-color': '#4C78A8', 'color': '#f8fafc' if theme == 'dark' else '#333'}},
+            {'selector': 'node', 'style': {'font-size': '7px', 'width': '12px', 'height': '12px', 'background-color': '#4C78A8', 'color': '#333'}},
             {'selector': '.top-contributor', 'style': {'label': 'data(label)', 'background-color': '#ef4444', 'width': '18px', 'height': '18px', 'font-size': '8px', 'font-weight': 'bold'}},
-            {'selector': 'edge', 'style': {'width': 'mapData(weight, 1, 30, 0.5, 4)', 'line-color': '#555' if theme == 'dark' else '#cccccc', 'opacity': 0.6}}
+            {'selector': 'edge', 'style': {'width': 'mapData(weight, 1, 30, 0.5, 4)', 'line-color': '#cccccc', 'opacity': 0.6}}
         ]
 
-        if not selected_repos:
+        if not selected_repo:
             return [], html.Div(
                 "Select a repository above to view its contributor network.",
                 style={"color": "gray"},
             ), base_stylesheet
+            
+        selected_repos = [selected_repo]
 
         start_month, end_month = get_month_range(month_range)
         events_df = load_events(repos=selected_repos, start_month=start_month, end_month=end_month, include_bots=bool(include_bots))
 
         if events_df.empty:
             return [], html.Div(
-                f"No collaboration data available for selected repos.",
+                f"No collaboration data available for {selected_repo}.",
                 style={"color": "gray"},
             ), base_stylesheet
 
@@ -152,3 +160,21 @@ def register(app):
         elements = build_network_elements(edges_df)
         summary = build_bus_factor_summary(selected_repos, edges_df)
         return elements, summary, base_stylesheet
+
+    @app.callback(
+        Output("network-hover-info", "children"),
+        [Input("contributor-network", "mouseoverNodeData")]
+    )
+    def display_hover_data(data):
+        if data:
+            return f"{data.get('id', 'Unknown')} (Centrality: {data.get('centrality', 0)})"
+        return "Hover over a node to see details"
+        
+    @app.callback(
+        Output("modal-hover-info", "children"),
+        [Input("modal-contributor-network", "mouseoverNodeData")]
+    )
+    def display_modal_hover_data(data):
+        if data:
+            return f"{data.get('id', 'Unknown')} (Centrality: {data.get('centrality', 0)})"
+        return "Hover over a node to see details"

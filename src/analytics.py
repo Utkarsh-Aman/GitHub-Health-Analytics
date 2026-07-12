@@ -30,7 +30,10 @@ def apply_millers_law(df, selected_repos, max_repos=7):
     if len(selected_repos) <= max_repos or df.empty or 'repo' not in df.columns:
         return df
         
-    top_repos = selected_repos[:max_repos]
+    # Find the top repos by actual activity volume in the current dataframe
+    repo_counts = df['repo'].value_counts()
+    top_repos = repo_counts.nlargest(max_repos).index.tolist()
+    
     df = df.copy()
     df.loc[~df['repo'].isin(top_repos), 'repo'] = 'Other (aggregate)'
     return df
@@ -78,13 +81,13 @@ def compute_health_summary(repos, pr_df,
 
         # Median PR merge time
         median_merge = (
-            round(pr['latency_hours'].median(), 1)
+            round(pr['latency_hours'].median(), 2)
             if len(pr) > 0 else None
         )
 
         # Median issue response time
         median_response = (
-            round(issue['response_time_hours'].median(), 1)
+            round(issue['response_time_hours'].median(), 2)
             if len(issue) > 0 else None
         )
 
@@ -171,11 +174,11 @@ def get_pr_stage_counts(df):
 # Used by: heatmap_cb.py
 def compute_daily_issue_activity(df):
     """
-    Count issue events per day for calendar heatmap.
+    Count issue events per day per repo for calendar heatmap.
 
     Input:  raw events DataFrame from load_events()
     Output: DataFrame with columns:
-            date | count | week | day_of_week | year
+            repo | date | count | week | day_of_week | year
     """
     issues = df[df['event_type'].isin(
         ['IssuesEvent', 'IssueCommentEvent']
@@ -186,7 +189,7 @@ def compute_daily_issue_activity(df):
     ).dt.date
 
     daily = issues.groupby(
-        'date'
+        ['repo', 'date']
     ).size().reset_index(name='count')
 
     daily['date'] = pd.to_datetime(daily['date'])
@@ -258,7 +261,7 @@ def compute_dynamic_network(events_df):
     # Drop rows with null pr_or_issue_number
     activity = activity.dropna(subset=['pr_or_issue_number'])
     
-    for _, group in activity.groupby('pr_or_issue_number'):
+    for _, group in activity.groupby(['repo', 'pr_or_issue_number']):
         actors = group['actor'].unique().tolist()
         if len(actors) >= 2:
             for a, b in combinations(sorted(actors), 2):
